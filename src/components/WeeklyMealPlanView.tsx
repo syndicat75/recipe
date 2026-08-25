@@ -94,7 +94,7 @@ const MEAL_SLOT_LABELS: Record<MealSlotType, { label: string; icon: string }> = 
  * 주간 식단표 전용 뷰 컴포넌트
  */
 export const WeeklyMealPlanView: React.FC<WeeklyMealPlanViewProps> = ({
-  mealPlan,
+  mealPlan = {},
   allRecipes,
   onSaveMealPlan,
   onOpenRecipeDetail,
@@ -104,6 +104,7 @@ export const WeeklyMealPlanView: React.FC<WeeklyMealPlanViewProps> = ({
   showToast,
   onOpenConfirm,
 }) => {
+  const safeMealPlan = mealPlan || {};
   const [currentWeekBase, setCurrentWeekBase] = useState<Date>(() => new Date());
   const [viewMode, setViewMode] = useState<ViewMode>('single');
 
@@ -163,7 +164,7 @@ export const WeeklyMealPlanView: React.FC<WeeklyMealPlanViewProps> = ({
     const { dateStr, slot } = selectingSlot;
     logger.info('WeeklyMealPlanView.handleSelectRecipeForSlot', `식단 등록: ${recipe.name} (${dateStr}, ${slot})`);
 
-    const existingEntries = mealPlan[dateStr] || [];
+    const existingEntries = safeMealPlan[dateStr] || [];
     // 동일 슬롯 기존 항목 덮어쓰기 또는 교체
     const filtered = existingEntries.filter((entry) => entry.slot !== slot);
     const newEntry: MealPlanEntry = {
@@ -177,7 +178,7 @@ export const WeeklyMealPlanView: React.FC<WeeklyMealPlanViewProps> = ({
     };
 
     const newPlan = {
-      ...mealPlan,
+      ...safeMealPlan,
       [dateStr]: [...filtered, newEntry],
     };
 
@@ -193,9 +194,9 @@ export const WeeklyMealPlanView: React.FC<WeeklyMealPlanViewProps> = ({
    */
   const handleDeleteMealEntry = (dateStr: string, entryId: string): void => {
     logger.info('WeeklyMealPlanView.handleDeleteMealEntry', `식단 항목 삭제: ${dateStr}, ID: ${entryId}`);
-    const existing = mealPlan[dateStr] || [];
+    const existing = safeMealPlan[dateStr] || [];
     const updated = existing.filter((e) => e.id !== entryId);
-    const newPlan = { ...mealPlan };
+    const newPlan = { ...safeMealPlan };
     if (updated.length === 0) {
       delete newPlan[dateStr];
     } else {
@@ -216,7 +217,7 @@ export const WeeklyMealPlanView: React.FC<WeeklyMealPlanViewProps> = ({
       confirmText: '전체 삭제',
       isDestructive: true,
       onConfirm: () => {
-        const newPlan = { ...mealPlan };
+        const newPlan = { ...safeMealPlan };
         dates.forEach((d) => {
           const k = formatDateKey(d);
           delete newPlan[k];
@@ -235,7 +236,7 @@ export const WeeklyMealPlanView: React.FC<WeeklyMealPlanViewProps> = ({
     const weeklyEntries: MealPlanEntry[] = [];
     dates.forEach((d) => {
       const k = formatDateKey(d);
-      const dayEntries = mealPlan[k] || [];
+      const dayEntries = safeMealPlan[k] || [];
       weeklyEntries.push(...dayEntries);
     });
 
@@ -401,7 +402,7 @@ export const WeeklyMealPlanView: React.FC<WeeklyMealPlanViewProps> = ({
           const dateStr = formatDateKey(dateObj);
           const isToday = formatDateKey(new Date()) === dateStr;
           const isWeekend = idx >= 5;
-          const dayEntries = mealPlan[dateStr] || [];
+          const dayEntries = safeMealPlan[dateStr] || [];
 
           return (
             <div

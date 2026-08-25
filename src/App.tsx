@@ -15,6 +15,8 @@ import {
   ToastMessage,
   FamilySpace,
   FamilyUserProfile,
+  WeeklyMealPlan,
+  MealPlanEntry,
 } from './types/recipe';
 import { CATEGORY_LIST } from './config/appConfig';
 import {
@@ -32,6 +34,8 @@ import {
   saveFamilyProfile,
   loadFamilySpaces,
   saveFamilySpaces,
+  loadWeeklyMealPlan,
+  saveWeeklyMealPlan,
 } from './utils/storage';
 import { logger } from './utils/logger';
 import { useFirebaseAuth } from './hooks/useFirebaseAuth';
@@ -78,6 +82,7 @@ import { TodayMenuModal } from './components/TodayMenuModal';
 import { WeeklyMealPlanView } from './components/WeeklyMealPlanView';
 import { FamilyShareModal } from './components/FamilyShareModal';
 import { CloudMigrationModal } from './components/CloudMigrationModal';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 type AppViewMode = 'home' | 'ai-chef' | 'meal-plan';
 
@@ -106,6 +111,7 @@ export default function App(): React.JSX.Element {
   const [shoppingList, setShoppingList] = useState<ShoppingItem[]>([]);
   const [userNotes, setUserNotes] = useState<Record<number, string>>({});
   const [recentRecipeIds, setRecentRecipeIds] = useState<number[]>([]);
+  const [weeklyMealPlan, setWeeklyMealPlan] = useState<WeeklyMealPlan>(() => loadWeeklyMealPlan());
 
   // Cloud Data Migration Modal State
   const [migrationModal, setMigrationModal] = useState<MigrationModalState>({
@@ -175,7 +181,7 @@ export default function App(): React.JSX.Element {
   /**
    * 전역 토스트 알림 메시지를 표시합니다.
    */
-  const showToast = useCallback((message: string, type: 'success' | 'info' | 'warning' = 'info'): void => {
+  const showToast = useCallback((message: string, type: 'success' | 'info' | 'warning' | 'error' = 'info'): void => {
     logger.info('App.showToast', `토스트 생성: "${message}" (${type})`);
     const id = Date.now().toString() + Math.random().toString(36).substring(2, 5);
     setToasts((prev) => [...prev, { id, message, type }]);
@@ -589,6 +595,46 @@ export default function App(): React.JSX.Element {
     });
     showToast('👨‍👩‍👧 모든 레시피가 가족 공간에 공유되었습니다!', 'success');
   }, [isAdmin, showToast]);
+
+  /**
+   * 주간 식단표 저장 핸들러
+   */
+  const handleSaveWeeklyMealPlan = useCallback((plan: WeeklyMealPlan): void => {
+    logger.info('App.handleSaveWeeklyMealPlan', `주간 식단표 저장: ${Object.keys(plan).length}일 등록`);
+    setWeeklyMealPlan(plan);
+    saveWeeklyMealPlan(plan);
+  }, []);
+
+  /**
+   * 오늘 뭐 먹지 -> 주간 식단에 메뉴 추가 핸들러
+   */
+  const handleAddRecipeToMealPlan = useCallback(
+    (recipe: Recipe, targetDate?: string): void => {
+      const date = targetDate || new Date().toISOString().split('T')[0];
+      logger.info('App.handleAddRecipeToMealPlan', `식단 추가: ${recipe.name} (${date})`);
+      const existingEntries = weeklyMealPlan[date] || [];
+      const now = Date.now();
+      const newEntry: MealPlanEntry = {
+        id: `meal_${now}_${Math.random().toString(36).substring(2, 6)}`,
+        date,
+        slot: 'single',
+        recipeId: recipe.id,
+        servings: recipe.baseServings || 2,
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      const withoutExistingSingle = existingEntries.filter((entry) => entry.slot !== 'single');
+      const nextPlan: WeeklyMealPlan = {
+        ...weeklyMealPlan,
+        [date]: [...withoutExistingSingle, newEntry],
+      };
+
+      handleSaveWeeklyMealPlan(nextPlan);
+      showToast(`'${recipe.name}' 요리가 ${date} 식단에 추가되었습니다!`, 'success');
+    },
+    [weeklyMealPlan, handleSaveWeeklyMealPlan, showToast]
+  );
 
   /**
    * 레시피 삭제 요청 (관리자 전용)
@@ -1124,201 +1170,220 @@ export default function App(): React.JSX.Element {
       />
 
       <main className="flex-1">
-        {currentView === 'ai-chef' ? (
-          /* ✨ AI 요리사 Q&A 화면 */
-          <AiChefView
-            activeRecipe={aiChefRecipe}
-            allRecipes={recipes}
-            userNotes={userNotes}
-            onSelectActiveRecipe={setAiChefRecipe}
-            onBackToHome={() => handleNavigateView('home')}
-            onSaveRecipeNote={handleSaveRecipeNote}
-            showToast={showToast}
-            onOpenConfirm={({ title, message, confirmText, onConfirm }) =>
-              setConfirmDialog({
-                isOpen: true,
-                title,
-                message,
-                confirmText: confirmText || '확인',
-                isDestructive: false,
-                onConfirm: () => {
-                  setConfirmDialog((prev) => ({ ...prev, isOpen: false }));
-                  onConfirm();
-                },
-              })
-            }
-            isOffline={isOffline}
-          />
-        ) : currentView === 'meal-plan' ? (
-          /* 📅 주간 식단표 화면 */
-          <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-            <WeeklyMealPlanView
+        <ErrorBoundary>
+          {currentView === 'ai-chef' ? (
+            /* ✨ AI 요리사 Q&A 화면 */
+            <AiChefView
+              activeRecipe={aiChefRecipe}
               allRecipes={recipes}
+              userNotes={userNotes}
+              onSelectActiveRecipe={setAiChefRecipe}
+              onBackToHome={() => handleNavigateView('home')}
+              onSaveRecipeNote={handleSaveRecipeNote}
+              showToast={showToast}
+              onOpenConfirm={({ title, message, confirmText, onConfirm }) =>
+                setConfirmDialog({
+                  isOpen: true,
+                  title,
+                  message,
+                  confirmText: confirmText || '확인',
+                  isDestructive: false,
+                  onConfirm: () => {
+                    setConfirmDialog((prev) => ({ ...prev, isOpen: false }));
+                    onConfirm();
+                  },
+                })
+              }
+              isOffline={isOffline}
+            />
+          ) : currentView === 'meal-plan' ? (
+            /* 📅 주간 식단표 화면 */
+            <WeeklyMealPlanView
+              mealPlan={weeklyMealPlan}
+              allRecipes={recipes}
+              onSaveMealPlan={handleSaveWeeklyMealPlan}
               onOpenRecipeDetail={handleOpenDetail}
+              onOpenTodayMenuModal={() => setIsTodayMenuModalOpen(true)}
               onAddShoppingItems={handleAddAllShoppingItems}
               onBackToHome={() => handleNavigateView('home')}
               showToast={showToast}
-            />
-          </div>
-        ) : (
-          /* 기본 홈 & 레시피 뷰 */
-          <>
-            {/* Hero Section */}
-            <HeroSection
-              totalRecipeCount={recipes.length}
-              categoryCount={CATEGORY_LIST.length}
-              bookmarkCount={bookmarkedIds.length}
-              onSelectCategory={setActiveCategory}
-              onScrollToRecipes={() => {
-                const el = document.getElementById('recipes');
-                if (el) el.scrollIntoView({ behavior: 'smooth' });
+              onOpenConfirm={({ title, message, confirmText, isDestructive, onConfirm }) => {
+                setConfirmDialog({
+                  isOpen: true,
+                  title,
+                  message,
+                  confirmText: confirmText || '확인',
+                  isDestructive: Boolean(isDestructive),
+                  onConfirm: () => {
+                    setConfirmDialog((prev) => ({
+                      ...prev,
+                      isOpen: false,
+                    }));
+                    onConfirm();
+                  },
+                });
               }}
             />
-
-            {/* Quick Action Bar for New Features */}
-            <div className="mx-auto max-w-7xl px-4 pt-4 sm:px-6 lg:px-8">
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                <button
-                  type="button"
-                  onClick={() => setIsTodayMenuModalOpen(true)}
-                  className="flex items-center gap-3 rounded-2xl border border-orange-200/80 bg-gradient-to-r from-orange-50 to-amber-50/60 p-3.5 text-left shadow-xs transition hover:scale-[1.02] hover:shadow-sm"
-                >
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-orange-500 text-white shadow-sm">
-                    <Dice5 className="h-5 w-5" />
-                  </div>
-                  <div>
-                    <h4 className="font-soft text-xs font-black text-stone-900">오늘 뭐 먹지?</h4>
-                    <p className="text-[10px] text-stone-500">랜덤 룰렛 & AI 추천</p>
-                  </div>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handleNavigateView('meal-plan')}
-                  className="flex items-center gap-3 rounded-2xl border border-amber-200/80 bg-gradient-to-r from-amber-50 to-orange-50/60 p-3.5 text-left shadow-xs transition hover:scale-[1.02] hover:shadow-sm"
-                >
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-500 text-white shadow-sm">
-                    <Calendar className="h-5 w-5" />
-                  </div>
-                  <div>
-                    <h4 className="font-soft text-xs font-black text-stone-900">주간 식단표</h4>
-                    <p className="text-[10px] text-stone-500">식단 계획 & 장보기</p>
-                  </div>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setIsImportModalOpen(true)}
-                  className="flex items-center gap-3 rounded-2xl border border-rose-200/80 bg-gradient-to-r from-rose-50 to-orange-50/60 p-3.5 text-left shadow-xs transition hover:scale-[1.02] hover:shadow-sm"
-                >
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-rose-500 text-white shadow-sm">
-                    <Sparkles className="h-5 w-5" />
-                  </div>
-                  <div>
-                    <h4 className="font-soft text-xs font-black text-stone-900">사진 인식 가져오기</h4>
-                    <p className="text-[10px] text-stone-500">요리책·메모 사진 OCR</p>
-                  </div>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setIsFamilyShareModalOpen(true)}
-                  className="flex items-center gap-3 rounded-2xl border border-emerald-200/80 bg-gradient-to-r from-emerald-50 to-teal-50/60 p-3.5 text-left shadow-xs transition hover:scale-[1.02] hover:shadow-sm"
-                >
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-600 text-white shadow-sm">
-                    <Users className="h-5 w-5" />
-                  </div>
-                  <div>
-                    <h4 className="font-soft text-xs font-black text-stone-900">
-                      {activeFamilySpace ? activeFamilySpace.name : '가족 공유 공간'}
-                    </h4>
-                    <p className="text-[10px] text-stone-500">레시피·식단 함께 보기</p>
-                  </div>
-                </button>
-              </div>
-            </div>
-
-            {/* Recently Viewed Recipes Bar */}
-            <RecentRecipes
-              allRecipes={recipes}
-              recentIds={recentRecipeIds}
-              onOpenDetail={handleOpenDetail}
-            />
-
-            {/* Recipe Finder Container */}
-            <div className="mx-auto max-w-7xl px-4 pt-8 sm:px-6 lg:px-8">
-              <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-                <div>
-                  <p className="text-xs font-black uppercase tracking-[0.2em] text-orange-500">
-                    Recipe Finder
-                  </p>
-                  <h2 className="mt-1 font-soft text-2xl font-black tracking-tight text-stone-900 sm:text-3xl">
-                    원하는 레시피를 바로 찾아보세요
-                  </h2>
-                </div>
-
-                {/* Search Input */}
-                <div className="w-full lg:max-w-md">
-                  <SearchBar
-                    searchQuery={searchQuery}
-                    onSearchChange={setSearchQuery}
-                    onSelectTag={(tag) => {
-                      setSearchQuery(tag);
-                      const el = document.getElementById('recipes');
-                      if (el) el.scrollIntoView({ behavior: 'smooth' });
-                    }}
-                  />
-                </div>
-              </div>
-
-              {/* Category Filter Tabs */}
-              <CategoryFilter
-                activeCategory={activeCategory}
-                onCategoryChange={setActiveCategory}
-                categoryCounts={categoryCounts}
-                totalCount={recipes.length}
+          ) : (
+            /* 기본 홈 & 레시피 뷰 */
+            <>
+              {/* Hero Section */}
+              <HeroSection
+                totalRecipeCount={recipes.length}
+                categoryCount={CATEGORY_LIST.length}
                 bookmarkCount={bookmarkedIds.length}
+                onSelectCategory={setActiveCategory}
+                onScrollToRecipes={() => {
+                  const el = document.getElementById('recipes');
+                  if (el) el.scrollIntoView({ behavior: 'smooth' });
+                }}
               />
-            </div>
 
-            {/* Recipe Grid & List */}
-            <RecipeList
-              recipes={filteredAndSortedRecipes}
-              activeCategory={activeCategory}
-              searchQuery={searchQuery}
-              bookmarkedIds={bookmarkedIds}
-              sortOption={sortOption}
-              onSortChange={setSortOption}
-              onToggleBookmark={handleToggleBookmark}
-              onOpenDetail={handleOpenDetail}
-              onResetFilters={() => {
-                setActiveCategory('전체');
-                setSearchQuery('');
-                setSortOption('default');
-              }}
-              onOpenAddRecipe={
-                isAdmin
-                  ? () => {
-                      setRecipeToEdit(null);
-                      setIsFormModalOpen(true);
-                    }
-                  : undefined
-              }
-            />
+              {/* Quick Action Bar for New Features */}
+              <div className="mx-auto max-w-7xl px-4 pt-4 sm:px-6 lg:px-8">
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                  <button
+                    type="button"
+                    onClick={() => setIsTodayMenuModalOpen(true)}
+                    className="flex items-center gap-3 rounded-2xl border border-orange-200/80 bg-gradient-to-r from-orange-50 to-amber-50/60 p-3.5 text-left shadow-xs transition hover:scale-[1.02] hover:shadow-sm"
+                  >
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-orange-500 text-white shadow-sm">
+                      <Dice5 className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <h4 className="font-soft text-xs font-black text-stone-900">오늘 뭐 먹지?</h4>
+                      <p className="text-[10px] text-stone-500">랜덤 룰렛 & AI 추천</p>
+                    </div>
+                  </button>
 
-            {/* Features & Guide Section */}
-            <AboutSection
-              onNavigateToAiChef={() => {
-                setAiChefRecipe(null);
-                handleNavigateView('ai-chef');
-              }}
-              onOpenShoppingList={() => setIsShoppingModalOpen(true)}
-              onOpenImportRecipe={() => setIsImportModalOpen(true)}
-              onInstallPwa={handleInstallPwa}
-              canInstallPwa={!!deferredPrompt}
-            />
-          </>
-        )}
+                  <button
+                    type="button"
+                    onClick={() => handleNavigateView('meal-plan')}
+                    className="flex items-center gap-3 rounded-2xl border border-amber-200/80 bg-gradient-to-r from-amber-50 to-orange-50/60 p-3.5 text-left shadow-xs transition hover:scale-[1.02] hover:shadow-sm"
+                  >
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-500 text-white shadow-sm">
+                      <Calendar className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <h4 className="font-soft text-xs font-black text-stone-900">주간 식단표</h4>
+                      <p className="text-[10px] text-stone-500">식단 계획 & 장보기</p>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setIsImportModalOpen(true)}
+                    className="flex items-center gap-3 rounded-2xl border border-rose-200/80 bg-gradient-to-r from-rose-50 to-orange-50/60 p-3.5 text-left shadow-xs transition hover:scale-[1.02] hover:shadow-sm"
+                  >
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-rose-500 text-white shadow-sm">
+                      <Sparkles className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <h4 className="font-soft text-xs font-black text-stone-900">사진 인식 가져오기</h4>
+                      <p className="text-[10px] text-stone-500">요리책·메모 사진 OCR</p>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setIsFamilyShareModalOpen(true)}
+                    className="flex items-center gap-3 rounded-2xl border border-emerald-200/80 bg-gradient-to-r from-emerald-50 to-teal-50/60 p-3.5 text-left shadow-xs transition hover:scale-[1.02] hover:shadow-sm"
+                  >
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-600 text-white shadow-sm">
+                      <Users className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <h4 className="font-soft text-xs font-black text-stone-900">
+                        {activeFamilySpace ? activeFamilySpace.name : '가족 공유 공간'}
+                      </h4>
+                      <p className="text-[10px] text-stone-500">레시피·식단 함께 보기</p>
+                    </div>
+                  </button>
+                </div>
+              </div>
+
+              {/* Recently Viewed Recipes Bar */}
+              <RecentRecipes
+                allRecipes={recipes}
+                recentIds={recentRecipeIds}
+                onOpenDetail={handleOpenDetail}
+              />
+
+              {/* Recipe Finder Container */}
+              <div className="mx-auto max-w-7xl px-4 pt-8 sm:px-6 lg:px-8">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+                  <div>
+                    <p className="text-xs font-black uppercase tracking-[0.2em] text-orange-500">
+                      Recipe Finder
+                    </p>
+                    <h2 className="mt-1 font-soft text-2xl font-black tracking-tight text-stone-900 sm:text-3xl">
+                      원하는 레시피를 바로 찾아보세요
+                    </h2>
+                  </div>
+
+                  {/* Search Input */}
+                  <div className="w-full lg:max-w-md">
+                    <SearchBar
+                      searchQuery={searchQuery}
+                      onSearchChange={setSearchQuery}
+                      onSelectTag={(tag) => {
+                        setSearchQuery(tag);
+                        const el = document.getElementById('recipes');
+                        if (el) el.scrollIntoView({ behavior: 'smooth' });
+                      }}
+                    />
+                  </div>
+                </div>
+
+                {/* Category Filter Tabs */}
+                <CategoryFilter
+                  activeCategory={activeCategory}
+                  onCategoryChange={setActiveCategory}
+                  categoryCounts={categoryCounts}
+                  totalCount={recipes.length}
+                  bookmarkCount={bookmarkedIds.length}
+                />
+              </div>
+
+              {/* Recipe Grid & List */}
+              <RecipeList
+                recipes={filteredAndSortedRecipes}
+                activeCategory={activeCategory}
+                searchQuery={searchQuery}
+                bookmarkedIds={bookmarkedIds}
+                sortOption={sortOption}
+                onSortChange={setSortOption}
+                onToggleBookmark={handleToggleBookmark}
+                onOpenDetail={handleOpenDetail}
+                onResetFilters={() => {
+                  setActiveCategory('전체');
+                  setSearchQuery('');
+                  setSortOption('default');
+                }}
+                onOpenAddRecipe={
+                  isAdmin
+                    ? () => {
+                        setRecipeToEdit(null);
+                        setIsFormModalOpen(true);
+                      }
+                    : undefined
+                }
+              />
+
+              {/* Features & Guide Section */}
+              <AboutSection
+                onNavigateToAiChef={() => {
+                  setAiChefRecipe(null);
+                  handleNavigateView('ai-chef');
+                }}
+                onOpenShoppingList={() => setIsShoppingModalOpen(true)}
+                onOpenImportRecipe={() => setIsImportModalOpen(true)}
+                onInstallPwa={handleInstallPwa}
+                canInstallPwa={!!deferredPrompt}
+              />
+            </>
+          )}
+        </ErrorBoundary>
       </main>
 
       {/* Floating Action Buttons (관리자 전용) */}
@@ -1413,9 +1478,10 @@ export default function App(): React.JSX.Element {
       <TodayMenuModal
         isOpen={isTodayMenuModalOpen}
         allRecipes={recipes}
+        bookmarkedIds={bookmarkedIds}
         onClose={() => setIsTodayMenuModalOpen(false)}
-        onSelectRecipe={handleOpenDetail}
-        onStartCooking={(recipe) => handleStartCookingMode(recipe, 1)}
+        onOpenRecipeDetail={handleOpenDetail}
+        onAddToMealPlan={handleAddRecipeToMealPlan}
         showToast={showToast}
       />
 
@@ -1487,8 +1553,8 @@ export default function App(): React.JSX.Element {
         isMigrating={migrationModal.isMigrating}
         onClose={() => setMigrationModal((prev) => ({ ...prev, isOpen: false }))}
         onUploadLocal={handleUploadLocalToCloud}
-        onMergeBoth={handleMergeLocalAndCloud}
-        onUseCloudOnly={handleUseCloudOnly}
+        onMerge={handleMergeLocalAndCloud}
+        onUseCloud={handleUseCloudOnly}
       />
     </div>
   );

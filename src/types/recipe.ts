@@ -51,6 +51,8 @@ export interface Recipe {
   isBookmarked?: boolean;
   /** 사용자 메모 */
   userNotes?: string;
+  /** 요리 꿀팁/팁 (선택) */
+  tip?: string;
   /** 생성 일시 타임스탬프 */
   createdAt?: number;
   /** 등록/수정 일시 타임스탬프 또는 ISO 문자열 */
@@ -196,7 +198,7 @@ export interface ToastMessage {
   /** 표시할 메시지 */
   message: string;
   /** 알림 유형 */
-  type?: 'success' | 'info' | 'warning';
+  type?: 'success' | 'info' | 'warning' | 'error';
 }
 
 /**

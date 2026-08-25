@@ -1,0 +1,67 @@
+{
+  "entities": {
+    "Recipe": {
+      "title": "Recipe",
+      "description": "A cooking recipe document in the shared public recipe collection",
+      "type": "object",
+      "properties": {
+        "id": { "type": "number", "description": "Unique numeric recipe ID" },
+        "name": { "type": "string", "description": "Recipe title" },
+        "category": { "type": "string", "description": "Recipe food category" },
+        "ingredients": { "type": "string", "description": "Recipe ingredient list" },
+        "method": { "type": "string", "description": "Step by step cooking instructions" },
+        "ingredientCount": { "type": "number", "description": "Total count of ingredients" },
+        "stepCount": { "type": "number", "description": "Total cooking step count" },
+        "icon": { "type": "string", "description": "Emoji icon for the recipe" },
+        "imageUrl": { "type": "string", "description": "Recipe photo URL" },
+        "cookingTimeMinutes": { "type": "number", "description": "Cooking time in minutes" },
+        "difficulty": { "type": "string", "description": "Cooking difficulty" },
+        "baseServings": { "type": "number", "description": "Base servings count" },
+        "sharedWithFamily": { "type": "boolean", "description": "Family space shared flag" },
+        "isCustom": { "type": "boolean", "description": "Custom recipe flag" },
+        "isBookmarked": { "type": "boolean", "description": "Bookmarked flag" },
+        "userNotes": { "type": "string", "description": "Notes for recipe" },
+        "createdAt": { "type": "number", "description": "Creation timestamp" },
+        "updatedAt": { "type": "number", "description": "Last updated timestamp" }
+      },
+      "required": ["id", "name", "category", "ingredients", "method"]
+    },
+    "ShoppingItem": {
+      "title": "ShoppingItem",
+      "description": "A shopping list item under a user's private shopping collection",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Shopping item unique ID" },
+        "text": { "type": "string", "description": "Shopping item description" },
+        "sourceRecipeName": { "type": "string", "description": "Source recipe name" },
+        "completed": { "type": "boolean", "description": "Item purchase completed flag" },
+        "createdAt": { "type": "number", "description": "Creation timestamp" }
+      },
+      "required": ["id", "text", "completed", "createdAt"]
+    },
+    "UserSettings": {
+      "title": "UserSettings",
+      "description": "User personal bookmarks and notes settings",
+      "type": "object",
+      "properties": {
+        "bookmarks": { "type": "array", "description": "Array of bookmarked recipe IDs" },
+        "notes": { "type": "object", "description": "Map of recipe ID to note string" },
+        "updatedAt": { "type": "number", "description": "Last updated timestamp" }
+      }
+    }
+  },
+  "firestore": {
+    "/recipes/{recipeId}": {
+      "schema": "Recipe",
+      "description": "Public recipes viewable by all users and editable by authenticated admin"
+    },
+    "/users/{userId}/settings/{docId}": {
+      "schema": "UserSettings",
+      "description": "Private user preferences, bookmarks, and personal notes"
+    },
+    "/users/{userId}/shoppingItems/{itemId}": {
+      "schema": "ShoppingItem",
+      "description": "Private user shopping list items"
+    }
+  }
+}
