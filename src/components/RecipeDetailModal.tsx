@@ -63,6 +63,8 @@ interface RecipeDetailModalProps {
   onSaveNote: (recipeId: number, note: string) => void;
   /** 가족 공유 상태 토글 핸들러 (선택) */
   onToggleFamilyShare?: (recipe: Recipe) => void;
+  /** 관리자 여부 (레시피 수정/삭제 권한) */
+  isAdmin?: boolean;
   /** 토스트 메시지 표시 함수 */
   showToast: (msg: string, type?: 'success' | 'info' | 'error') => void;
 }
@@ -84,6 +86,7 @@ export const RecipeDetailModal: React.FC<RecipeDetailModalProps> = ({
   onDeleteRecipe,
   onSaveNote,
   onToggleFamilyShare,
+  isAdmin = false,
   showToast,
 }) => {
   const baseServings = recipe?.baseServings || 2;
@@ -651,7 +654,7 @@ ${userNote ? `\n[📝 나의 메모]\n${userNote}` : ''}`;
             </div>
 
             <div className="flex items-center gap-2">
-              {recipe.isCustom && (
+              {isAdmin && (
                 <>
                   <button
                     type="button"
@@ -660,8 +663,9 @@ ${userNote ? `\n[📝 나의 메모]\n${userNote}` : ''}`;
                       onOpenEditRecipe(recipe);
                     }}
                     className="flex items-center gap-1 rounded-xl bg-stone-100 px-3 py-2 text-xs font-bold text-stone-700 hover:bg-stone-200"
+                    title="레시피 수정 (관리자)"
                   >
-                    <Edit3 className="h-3.5 w-3.5" />
+                    <Edit3 className="h-3.5 w-3.5 text-stone-600" />
                     <span>레시피 수정</span>
                   </button>
 
@@ -672,6 +676,7 @@ ${userNote ? `\n[📝 나의 메모]\n${userNote}` : ''}`;
                       onDeleteRecipe(recipe.id);
                     }}
                     className="flex items-center gap-1 rounded-xl bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700 hover:bg-rose-100"
+                    title="레시피 삭제 (관리자)"
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                     <span>삭제</span>

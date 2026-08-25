@@ -1,7 +1,7 @@
 /**
  * @file src/components/Header.tsx
  * @description 웹앱 상단 네비게이션 바, 브랜드 로고, 오늘 뭐 먹지(🎲), 주간 식단표(📅), AI 요리사(✨),
- * 가족 공유 공간(👨‍👩‍👧), 즐겨찾기, 장보기, 레시피 추가/가져오기, 데이터 백업 및 주방 타이머 버튼 지원
+ * 가족 공유 공간(👨‍👩‍👧), 즐겨찾기, 장보기, 타이머 위젯 및 관리자 전용 레시피 관리(추가/가져오기/백업) 지원
  */
 
 import React, { useState, useRef, useEffect } from 'react';
@@ -29,6 +29,7 @@ import {
   CloudCheck,
   RefreshCw,
   AlertCircle,
+  ShieldCheck,
   User as UserIcon,
 } from 'lucide-react';
 import { APP_CONFIG } from '../config/appConfig';
@@ -51,9 +52,9 @@ interface HeaderProps {
   shoppingCount: number;
   /** 장보기 모달 열기 핸들러 */
   onOpenShoppingList: () => void;
-  /** 레시피 추가 모달 열기 핸들러 */
+  /** 레시피 추가 모달 열기 핸들러 (관리자 전용) */
   onOpenAddRecipe: () => void;
-  /** 외부 레시피 AI 가져오기 모달 열기 핸들러 */
+  /** 외부 레시피 AI 가져오기 모달 열기 핸들러 (관리자 전용) */
   onOpenImportRecipe: () => void;
   /** 오늘 뭐 먹지 룰렛/AI 모달 열기 핸들러 */
   onOpenTodayMenu: () => void;
@@ -61,7 +62,7 @@ interface HeaderProps {
   onOpenFamilyShare: () => void;
   /** 참여 중인 가족 공간 이름 (없으면 null) */
   currentFamilyName?: string | null;
-  /** 백업/복원 모달 열기 핸들러 */
+  /** 백업/복원 모달 열기 핸들러 (관리자 전용) */
   onOpenBackupRestore: () => void;
   /** 타이머 위젯 토글 핸들러 */
   onToggleTimer: () => void;
@@ -75,6 +76,8 @@ interface HeaderProps {
   isOffline?: boolean;
   /** Firebase 로그인된 사용자 정보 */
   user?: FirebaseAuthUser | null;
+  /** 관리자 권한 여부 */
+  isAdmin?: boolean;
   /** 클라우드 동기화 상태 */
   syncStatus?: SyncStatus;
   /** 로그인 진행 중 여부 */
@@ -110,6 +113,7 @@ export const Header: React.FC<HeaderProps> = ({
   onInstallPwa,
   isOffline = false,
   user = null,
+  isAdmin = false,
   syncStatus = 'local-only',
   isLoggingIn = false,
   onLogin,
@@ -189,8 +193,13 @@ export const Header: React.FC<HeaderProps> = ({
             🍳
           </span>
           <div>
-            <div className="font-soft text-[16px] font-black tracking-tight text-stone-900 sm:text-lg">
-              {APP_CONFIG.appName}
+            <div className="font-soft text-[16px] font-black tracking-tight text-stone-900 sm:text-lg flex items-center gap-1.5">
+              <span>{APP_CONFIG.appName}</span>
+              {isAdmin && (
+                <span className="rounded-md bg-orange-500 px-1.5 py-0.5 text-[9px] font-black text-white tracking-normal">
+                  관리자
+                </span>
+              )}
             </div>
             <div className="hidden text-[9px] font-extrabold tracking-[0.2em] text-orange-600 sm:block">
               {APP_CONFIG.appSubTitle}
@@ -298,29 +307,34 @@ export const Header: React.FC<HeaderProps> = ({
             <span>{currentFamilyName ? currentFamilyName : '가족 공간'}</span>
           </button>
 
-          {/* External Recipe Import Button */}
-          <button
-            type="button"
-            onClick={() => {
-              logger.info('Header', '외부 레시피 가져오기 클릭');
-              onOpenImportRecipe();
-            }}
-            className="flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-semibold text-stone-600 transition hover:bg-orange-100 hover:text-orange-800"
-            title="웹페이지 URL, 텍스트 또는 사진에서 AI로 레시피 가져오기"
-          >
-            <Camera className="h-3.5 w-3.5 text-orange-500" />
-            <span>가져오기</span>
-          </button>
+          {/* 관리자 전용: 외부 레시피 가져오기 */}
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={() => {
+                logger.info('Header', '관리자 외부 레시피 가져오기 클릭');
+                onOpenImportRecipe();
+              }}
+              className="flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-semibold text-orange-700 bg-orange-50/80 hover:bg-orange-100 transition"
+              title="웹페이지 URL, 텍스트 또는 사진에서 AI로 레시피 가져오기 (관리자)"
+            >
+              <Camera className="h-3.5 w-3.5 text-orange-500" />
+              <span>가져오기</span>
+            </button>
+          )}
 
-          <button
-            type="button"
-            onClick={onOpenBackupRestore}
-            className="flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-semibold text-stone-600 transition hover:bg-orange-100 hover:text-orange-800"
-            title="데이터 백업 및 복원"
-          >
-            <Database className="h-3.5 w-3.5 text-stone-500" />
-            <span>백업/복원</span>
-          </button>
+          {/* 관리자 전용: 데이터 백업 및 복원 */}
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={onOpenBackupRestore}
+              className="flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-semibold text-stone-600 transition hover:bg-orange-100 hover:text-orange-800"
+              title="데이터 백업 및 복원 (관리자)"
+            >
+              <Database className="h-3.5 w-3.5 text-stone-500" />
+              <span>백업/복원</span>
+            </button>
+          )}
 
           {canInstallPwa && onInstallPwa && (
             <button
@@ -385,8 +399,12 @@ export const Header: React.FC<HeaderProps> = ({
               <button
                 type="button"
                 onClick={() => setIsUserMenuOpen((prev) => !prev)}
-                className="flex h-10 items-center gap-2 rounded-xl border border-orange-200 bg-white px-2.5 sm:px-3 text-xs font-bold text-stone-700 shadow-sm transition hover:bg-orange-50"
-                title={`${user.displayName || user.email} 계정 관리`}
+                className={`flex h-10 items-center gap-2 rounded-xl border px-2.5 sm:px-3 text-xs font-bold shadow-sm transition ${
+                  isAdmin
+                    ? 'border-orange-300 bg-orange-50/70 text-orange-950 hover:bg-orange-100'
+                    : 'border-orange-200 bg-white text-stone-700 hover:bg-orange-50'
+                }`}
+                title={`${user.displayName || user.email} 계정 관리 (${isAdmin ? '관리자' : '일반 사용자'})`}
                 aria-label="사용자 계정 메뉴"
               >
                 {user.photoURL ? (
@@ -404,6 +422,11 @@ export const Header: React.FC<HeaderProps> = ({
                 <span className="hidden md:inline max-w-[90px] truncate text-stone-800">
                   {user.displayName || '내 계정'}
                 </span>
+                {isAdmin && (
+                  <span className="hidden lg:inline text-[10px] font-black text-orange-600 bg-white px-1.5 py-0.5 rounded-md border border-orange-200">
+                    👑 관리자
+                  </span>
+                )}
               </button>
 
               {/* User Dropdown Menu */}
@@ -423,14 +446,26 @@ export const Header: React.FC<HeaderProps> = ({
                       </div>
                     )}
                     <div className="overflow-hidden">
-                      <div className="font-bold text-stone-900 text-xs truncate">
-                        {user.displayName || 'Google 사용자'}
+                      <div className="font-bold text-stone-900 text-xs truncate flex items-center gap-1">
+                        <span>{user.displayName || 'Google 사용자'}</span>
+                        {isAdmin && (
+                          <span className="text-[9px] bg-orange-500 text-white font-black px-1 rounded">
+                            관리자
+                          </span>
+                        )}
                       </div>
                       <div className="text-[11px] text-stone-500 truncate">{user.email}</div>
                     </div>
                   </div>
 
                   <div className="py-2 space-y-1">
+                    <div className="flex items-center justify-between px-2 py-1 text-[11px] text-stone-600 rounded-lg bg-stone-50">
+                      <span>권한 상태:</span>
+                      <span className="font-bold text-orange-600">
+                        {isAdmin ? '👑 레시피 관리자' : '👤 일반 방문자'}
+                      </span>
+                    </div>
+
                     <div className="flex items-center justify-between px-2 py-1 text-[11px] text-stone-600 rounded-lg bg-stone-50">
                       <span>동기화 상태:</span>
                       <span className="font-bold">
@@ -446,7 +481,7 @@ export const Header: React.FC<HeaderProps> = ({
                       </span>
                     </div>
 
-                    {onOpenCloudSyncModal && (
+                    {isAdmin && onOpenCloudSyncModal && (
                       <button
                         type="button"
                         onClick={() => {
@@ -456,7 +491,7 @@ export const Header: React.FC<HeaderProps> = ({
                         className="w-full flex items-center gap-2 rounded-xl px-2.5 py-2 text-xs font-semibold text-stone-700 hover:bg-orange-50 hover:text-orange-900 transition text-left"
                       >
                         <Cloud className="h-4 w-4 text-orange-500" />
-                        <span>클라우드 동기화 관리</span>
+                        <span>클라우드 공개 레시피 동기화</span>
                       </button>
                     )}
                   </div>
@@ -482,11 +517,11 @@ export const Header: React.FC<HeaderProps> = ({
               type="button"
               onClick={onLogin}
               disabled={isLoggingIn}
-              className={`flex h-10 items-center gap-1.5 rounded-xl border border-stone-200 bg-white px-2.5 sm:px-3 text-xs font-bold text-stone-700 shadow-sm transition hover:bg-stone-50 hover:border-orange-200 ${
+              className={`flex h-10 items-center gap-1.5 rounded-xl border border-orange-200 bg-white px-2.5 sm:px-3 text-xs font-bold text-stone-700 shadow-sm transition hover:bg-stone-50 hover:border-orange-300 ${
                 isLoggingIn ? 'opacity-70 cursor-not-allowed' : ''
               }`}
-              title={isLoggingIn ? 'Google 로그인 처리 중입니다...' : 'Google 계정으로 로그인하여 기기간 레시피 동기화'}
-              aria-label="Google 계정으로 로그인"
+              title={isLoggingIn ? 'Google 로그인 처리 중입니다...' : '관리자 Google 계정으로 로그인하여 레시피 관리'}
+              aria-label="관리자 Google 로그인"
             >
               {isLoggingIn ? (
                 <RefreshCw className="h-4 w-4 text-orange-500 animate-spin" />
@@ -499,10 +534,10 @@ export const Header: React.FC<HeaderProps> = ({
                 </svg>
               )}
               <span className="hidden sm:inline">
-                {isLoggingIn ? 'Google 로그인 중...' : 'Google로 로그인'}
+                {isLoggingIn ? '로그인 중...' : '관리자 로그인'}
               </span>
               <span className="sm:hidden">
-                {isLoggingIn ? '로그인 중...' : '로그인'}
+                {isLoggingIn ? '로그인...' : '관리자 로그인'}
               </span>
             </button>
           )}
@@ -546,19 +581,21 @@ export const Header: React.FC<HeaderProps> = ({
             )}
           </button>
 
-          {/* Add Recipe Primary Button */}
-          <button
-            type="button"
-            onClick={() => {
-              logger.info('Header', '레시피 등록 모달 열기 클릭');
-              onOpenAddRecipe();
-            }}
-            className="flex h-10 items-center gap-1.5 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 px-3.5 sm:px-4 text-xs font-black text-white shadow-md shadow-orange-500/20 transition hover:from-orange-600 hover:to-amber-600 active:scale-95"
-            title="새 레시피 직접 등록"
-          >
-            <PlusCircle className="h-4 w-4" />
-            <span>레시피 추가</span>
-          </button>
+          {/* Add Recipe Primary Button (관리자 전용) */}
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={() => {
+                logger.info('Header', '관리자 레시피 등록 모달 열기 클릭');
+                onOpenAddRecipe();
+              }}
+              className="flex h-10 items-center gap-1.5 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 px-3.5 sm:px-4 text-xs font-black text-white shadow-md shadow-orange-500/20 transition hover:from-orange-600 hover:to-amber-600 active:scale-95"
+              title="새 레시피 직접 등록 (관리자)"
+            >
+              <PlusCircle className="h-4 w-4" />
+              <span>레시피 추가</span>
+            </button>
+          )}
 
           {/* Mobile Menu Toggle Button */}
           <button
@@ -592,8 +629,13 @@ export const Header: React.FC<HeaderProps> = ({
                   </div>
                 )}
                 <div className="min-w-0">
-                  <div className="font-bold text-xs text-stone-900 truncate">
-                    {user.displayName || 'Google 사용자'}
+                  <div className="font-bold text-xs text-stone-900 truncate flex items-center gap-1">
+                    <span>{user.displayName || 'Google 사용자'}</span>
+                    {isAdmin && (
+                      <span className="text-[9px] bg-orange-500 text-white font-black px-1 rounded">
+                        관리자
+                      </span>
+                    )}
                   </div>
                   <div className="text-[10px] text-stone-500 flex items-center gap-1">
                     <span>
@@ -624,8 +666,8 @@ export const Header: React.FC<HeaderProps> = ({
           ) : (
             <div className="rounded-2xl bg-stone-50 p-3 border border-stone-200/80 space-y-2">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-stone-700">클라우드 동기화</span>
-                <span className="text-[10px] text-stone-500">PC·모바일 레시피 공유</span>
+                <span className="text-xs font-bold text-stone-700">관리자 인증</span>
+                <span className="text-[10px] text-stone-500">레시피 편집 및 관리</span>
               </div>
               <button
                 type="button"
@@ -647,7 +689,7 @@ export const Header: React.FC<HeaderProps> = ({
                     <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
                   </svg>
                 )}
-                <span>{isLoggingIn ? 'Google 로그인 중...' : 'Google로 로그인'}</span>
+                <span>{isLoggingIn ? '로그인 처리 중...' : '관리자 Google 로그인'}</span>
               </button>
             </div>
           )}
@@ -733,29 +775,45 @@ export const Header: React.FC<HeaderProps> = ({
               <span>즐겨찾기 ({bookmarkCount})</span>
             </button>
 
-            <button
-              type="button"
-              onClick={() => {
-                onOpenImportRecipe();
-                setIsMobileMenuOpen(false);
-              }}
-              className="flex items-center gap-2 rounded-xl p-2.5 text-xs font-bold text-stone-700 hover:bg-stone-50"
-            >
-              <Camera className="h-4 w-4 text-orange-500" />
-              <span>레시피 가져오기 / 사진 인식</span>
-            </button>
+            {isAdmin && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onOpenAddRecipe();
+                    setIsMobileMenuOpen(false);
+                  }}
+                  className="flex items-center gap-2 rounded-xl p-2.5 text-xs font-black text-orange-700 bg-orange-50 hover:bg-orange-100"
+                >
+                  <PlusCircle className="h-4 w-4 text-orange-600" />
+                  <span>새 레시피 등록 (관리자)</span>
+                </button>
 
-            <button
-              type="button"
-              onClick={() => {
-                onOpenBackupRestore();
-                setIsMobileMenuOpen(false);
-              }}
-              className="flex items-center gap-2 rounded-xl p-2.5 text-xs font-bold text-stone-700 hover:bg-stone-50"
-            >
-              <Database className="h-4 w-4 text-stone-500" />
-              <span>데이터 백업 및 복원</span>
-            </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onOpenImportRecipe();
+                    setIsMobileMenuOpen(false);
+                  }}
+                  className="flex items-center gap-2 rounded-xl p-2.5 text-xs font-bold text-stone-700 hover:bg-stone-50"
+                >
+                  <Camera className="h-4 w-4 text-orange-500" />
+                  <span>레시피 가져오기 / 사진 인식 (관리자)</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    onOpenBackupRestore();
+                    setIsMobileMenuOpen(false);
+                  }}
+                  className="flex items-center gap-2 rounded-xl p-2.5 text-xs font-bold text-stone-700 hover:bg-stone-50"
+                >
+                  <Database className="h-4 w-4 text-stone-500" />
+                  <span>데이터 백업 및 복원 (관리자)</span>
+                </button>
+              </>
+            )}
           </div>
         </div>
       )}

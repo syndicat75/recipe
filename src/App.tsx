@@ -35,12 +35,15 @@ import {
 } from './utils/storage';
 import { logger } from './utils/logger';
 import { useFirebaseAuth } from './hooks/useFirebaseAuth';
+import { isUserAdmin } from './utils/admin';
 import {
-  subscribeToUserRecipes,
+  subscribeToPublicRecipes,
+  fetchPublicRecipeCount,
+  savePublicRecipe,
+  deletePublicRecipe,
+  publishAllRecipesToPublic,
   subscribeToUserSettings,
   subscribeToUserShopping,
-  saveRecipeToCloud,
-  deleteRecipeFromCloud,
   saveBookmarksToCloud,
   saveRecipeNoteToCloud,
   saveShoppingItemToCloud,
@@ -93,6 +96,9 @@ export default function App(): React.JSX.Element {
     logout,
     isOnline,
   } = useFirebaseAuth();
+
+  // 관리자 여부 판별 (VITE_ADMIN_UID와 현재 로그인 UID 비교)
+  const isAdmin = useMemo(() => isUserAdmin(user?.uid), [user?.uid]);
 
   // 1. Core Data State
   const [recipes, setRecipes] = useState<Recipe[]>([]);
@@ -290,78 +296,65 @@ export default function App(): React.JSX.Element {
     setRecentRecipeIds(loadedRecent);
   }, []);
 
-  // Firebase 사용자 인증 변경 및 Firestore 실시간 동기화 리스너 연결
+  // 1. 공개 레시피 컬렉션 실시간 구독 (/recipes) - 모든 방문자(비로그인/로그인)에게 실시간 반영
+  useEffect(() => {
+    logger.info('App.publicSync', '공개 레시피(/recipes) 실시간 리스너 등록');
+    const unsub = subscribeToPublicRecipes(
+      (publicRecipes) => {
+        logger.info('App.publicSync', `공개 레시피 수신: ${publicRecipes.length}개`);
+        if (publicRecipes.length > 0) {
+          setRecipes(publicRecipes);
+          saveAllRecipes(publicRecipes);
+        }
+      },
+      (err) => {
+        logger.warn('App.publicSync', '공개 레시피 구독 에러 (로컬 캐시 레시피 유지)', err);
+      }
+    );
+    return () => {
+      unsub();
+    };
+  }, []);
+
+  // 2. 로그인 사용자 개인 데이터(북마크, 메모, 장보기) 및 관리자 배포 검사
   useEffect(() => {
     if (!user) {
       logger.info('App.authSync', '게스트/로그아웃 상태: 로컬 데이터 모드 유지');
       return;
     }
 
-    logger.info('App.authSync', `로그인 사용자 클라우드 동기화 연결: ${user.email} (UID: ${user.uid})`);
+    logger.info('App.authSync', `로그인 사용자 동기화 연결: ${user.email} (UID: ${user.uid}, 관리자: ${isAdmin})`);
     setSyncStatus('syncing');
 
-    // 1. 마이그레이션 필요 여부 검사
-    const migrationStorageKey = `my_recipe_migrated_${user.uid}`;
-    const isAlreadyMigrated = localStorage.getItem(migrationStorageKey) === 'true';
+    // 관리자 로그인 시 클라우드 공개 레시피가 0개이면 로컬 레시피 최초 게시 제안
+    if (isAdmin) {
+      const migrationStorageKey = `my_recipe_admin_migrated_${user.uid}`;
+      const isAlreadyMigrated = localStorage.getItem(migrationStorageKey) === 'true';
 
-    fetchCloudSummary(user.uid)
-      .then((summary) => {
-        logger.info(
-          'App.authSync',
-          `클라우드 요약 조회: 레시피 ${summary.recipeCount}개, 즐겨찾기 ${summary.bookmarkCount}개`
-        );
-
-        const currentLocal = loadAllRecipes();
-        const localCount = currentLocal.length;
-
-        if (!isAlreadyMigrated) {
-          if (summary.recipeCount === 0 && localCount > 0) {
+      fetchPublicRecipeCount()
+        .then((pubCount) => {
+          logger.info('App.authSync', `공개 레시피 통계: ${pubCount}개`);
+          const currentLocal = loadAllRecipes();
+          if (!isAlreadyMigrated && pubCount === 0 && currentLocal.length > 0) {
             setMigrationModal({
               isOpen: true,
               mode: 'initial',
-              localRecipeCount: localCount,
+              localRecipeCount: currentLocal.length,
               cloudRecipeCount: 0,
               isMigrating: false,
             });
-          } else if (summary.recipeCount > 0 && localCount > 0) {
-            setMigrationModal({
-              isOpen: true,
-              mode: 'conflict',
-              localRecipeCount: localCount,
-              cloudRecipeCount: summary.recipeCount,
-              isMigrating: false,
-            });
-          } else {
-            localStorage.setItem(migrationStorageKey, 'true');
           }
-        }
-      })
-      .catch((err) => {
-        logger.error('App.authSync', '클라우드 요약 조회 실패', err);
-      });
+        })
+        .catch((err) => {
+          logger.error('App.authSync', '공개 레시피 개수 조회 실패', err);
+        });
+    }
 
-    // 2. 실시간 Firestore 레시피 컬렉션 리스너
-    const unsubRecipes = subscribeToUserRecipes(
-      user.uid,
-      (cloudRecipes) => {
-        logger.info('App.authSync', `실시간 레시피 수신: ${cloudRecipes.length}개`);
-        if (cloudRecipes.length > 0) {
-          setRecipes(cloudRecipes);
-          saveAllRecipes(cloudRecipes);
-        }
-        setSyncStatus('synced');
-      },
-      (err) => {
-        logger.error('App.authSync', '레시피 구독 에러', err);
-        setSyncStatus('error');
-      }
-    );
-
-    // 3. 실시간 사용자 설정(즐겨찾기, 메모) 리스너
+    // 사용자 개인 설정(즐겨찾기, 메모) 리스너
     const unsubSettings = subscribeToUserSettings(
       user.uid,
       ({ bookmarks, notes }) => {
-        logger.info('App.authSync', `실시간 설정 수신: 북마크 ${bookmarks.length}개, 메모 ${Object.keys(notes).length}개`);
+        logger.info('App.authSync', `실시간 개인 설정 수신: 북마크 ${bookmarks.length}개, 메모 ${Object.keys(notes).length}개`);
         setBookmarkedIds(bookmarks);
         saveBookmarks(bookmarks);
         setUserNotes(notes);
@@ -371,26 +364,27 @@ export default function App(): React.JSX.Element {
       }
     );
 
-    // 4. 실시간 장보기 목록 리스너
+    // 사용자 개인 장보기 목록 리스너
     const unsubShopping = subscribeToUserShopping(
       user.uid,
       (cloudShopping) => {
         logger.info('App.authSync', `실시간 장보기 수신: ${cloudShopping.length}개`);
         setShoppingList(cloudShopping);
         saveShoppingList(cloudShopping);
+        setSyncStatus('synced');
       },
       (err) => {
         logger.error('App.authSync', '장보기 구독 에러', err);
+        setSyncStatus('error');
       }
     );
 
     return () => {
-      logger.info('App.authSync', 'Firestore 리스너 해제');
-      unsubRecipes();
+      logger.info('App.authSync', '사용자 개인 데이터 리스너 해제');
       unsubSettings();
       unsubShopping();
     };
-  }, [user, setSyncStatus]);
+  }, [user, isAdmin, setSyncStatus]);
 
   // 카테고리별 개수 맵 계산
   const categoryCounts = useMemo((): Record<string, number> => {
@@ -474,11 +468,16 @@ export default function App(): React.JSX.Element {
   }, []);
 
   /**
-   * 레시피 등록 또는 수정 저장 핸들러
+   * 레시피 등록 또는 수정 저장 핸들러 (관리자 전용)
    */
   const handleSaveRecipe = useCallback(
     (recipeData: Recipe, isBookmarked: boolean, userNote: string): void => {
-      logger.info('App.handleSaveRecipe', `레시피 저장: ${recipeData.name} (ID: ${recipeData.id})`);
+      logger.info('App.handleSaveRecipe', `레시피 저장: ${recipeData.name} (ID: ${recipeData.id}, 관리자: ${isAdmin})`);
+
+      if (!isAdmin) {
+        showToast('🔒 레시피 추가 및 수정은 관리자만 가능합니다.', 'warning');
+        return;
+      }
 
       setRecipes((prev) => {
         const existingIdx = prev.findIndex((r) => r.id === recipeData.id);
@@ -519,14 +518,13 @@ export default function App(): React.JSX.Element {
         });
       }
 
-      // 클라우드 동기화
-      if (user) {
-        saveRecipeToCloud(user.uid, recipeData).catch((err) => {
-          logger.error('App.handleSaveRecipe', '클라우드 레시피 저장 실패', err);
-          showToast('클라우드 동기화 중 일시적 오류가 발생했습니다. 로컬 저장은 완료되었습니다.', 'warning');
-          setSyncStatus('error');
-        });
+      // 관리자: 공개 컬렉션 (/recipes) 실시간 동기화
+      savePublicRecipe(recipeData).catch((err) => {
+        logger.error('App.handleSaveRecipe', '공개 레시피 클라우드 저장 실패', err);
+        showToast('클라우드 동기화 중 일시적 오류가 발생했습니다. 로컬 저장은 완료되었습니다.', 'warning');
+      });
 
+      if (user) {
         saveBookmarksToCloud(user.uid, nextBookmarks).catch((err) => {
           logger.error('App.handleSaveRecipe', '클라우드 북마크 동기화 실패', err);
         });
@@ -540,7 +538,7 @@ export default function App(): React.JSX.Element {
 
       showToast(`'${recipeData.name}' 레시피가 성공적으로 저장되었습니다!`, 'success');
     },
-    [user, bookmarkedIds, userNotes, showToast, setSyncStatus]
+    [isAdmin, user, bookmarkedIds, userNotes, showToast]
   );
 
   /**
@@ -560,8 +558,8 @@ export default function App(): React.JSX.Element {
       setSelectedRecipe((prev) => (prev ? { ...prev, sharedWithFamily: nextShared } : null));
     }
 
-    if (user) {
-      saveRecipeToCloud(user.uid, { ...recipe, sharedWithFamily: nextShared }).catch((err) => {
+    if (isAdmin) {
+      savePublicRecipe({ ...recipe, sharedWithFamily: nextShared }).catch((err) => {
         logger.error('App.handleToggleFamilyShareRecipe', '클라우드 공유 상태 동기화 실패', err);
       });
     }
@@ -572,7 +570,7 @@ export default function App(): React.JSX.Element {
         : `🔒 '${recipe.name}'이(가) 나만 보기로 전환되었습니다.`,
       'success'
     );
-  }, [user, selectedRecipe, showToast]);
+  }, [isAdmin, selectedRecipe, showToast]);
 
   /**
    * 내 레시피 전체 일괄 가족 공유
@@ -582,32 +580,37 @@ export default function App(): React.JSX.Element {
     setRecipes((prev) => {
       const next = prev.map((r) => ({ ...r, sharedWithFamily: true }));
       saveAllRecipes(next);
-      if (user) {
-        Promise.all(next.map((r) => saveRecipeToCloud(user.uid, r))).catch((err) => {
+      if (isAdmin) {
+        publishAllRecipesToPublic(next).catch((err) => {
           logger.error('App.handleShareAllMyRecipes', '클라우드 일괄 공유 저장 실패', err);
         });
       }
       return next;
     });
     showToast('👨‍👩‍👧 모든 레시피가 가족 공간에 공유되었습니다!', 'success');
-  }, [user, showToast]);
+  }, [isAdmin, showToast]);
 
   /**
-   * 레시피 삭제 요청
+   * 레시피 삭제 요청 (관리자 전용)
    */
   const handleDeleteRecipeRequest = useCallback(
     (recipeId: number): void => {
       const target = recipes.find((r) => r.id === recipeId);
       if (!target) return;
 
+      if (!isAdmin) {
+        showToast('🔒 레시피 삭제는 관리자만 가능합니다.', 'warning');
+        return;
+      }
+
       setConfirmDialog({
         isOpen: true,
         title: '레시피 삭제',
-        message: `'${target.name}' 레시피를 정말 삭제하시겠습니까? 삭제된 레시피는 복구할 수 없습니다.`,
+        message: `'${target.name}' 레시피를 정말 삭제하시겠습니까? 삭제된 레시피는 공개 목록에서 영구히 제거됩니다.`,
         confirmText: '삭제',
         isDestructive: true,
         onConfirm: () => {
-          logger.info('App.handleDeleteRecipe', `레시피 삭제 확정: ID ${recipeId}`);
+          logger.info('App.handleDeleteRecipe', `관리자 레시피 삭제 확정: ID ${recipeId}`);
           setRecipes((prev) => {
             const next = prev.filter((r) => r.id !== recipeId);
             saveAllRecipes(next);
@@ -622,11 +625,9 @@ export default function App(): React.JSX.Element {
             return next;
           });
 
-          if (user) {
-            deleteRecipeFromCloud(user.uid, recipeId).catch((err) => {
-              logger.error('App.handleDeleteRecipe', '클라우드 레시피 삭제 실패', err);
-            });
-          }
+          deletePublicRecipe(recipeId).catch((err) => {
+            logger.error('App.handleDeleteRecipe', '공개 레시피 삭제 실패', err);
+          });
 
           setSelectedRecipe(null);
           setRecipeToEdit(null);
@@ -635,7 +636,7 @@ export default function App(): React.JSX.Element {
         },
       });
     },
-    [user, recipes, showToast]
+    [isAdmin, user, recipes, showToast]
   );
 
   /**
@@ -809,7 +810,12 @@ export default function App(): React.JSX.Element {
         currentShopping
       );
 
+      if (isAdmin) {
+        await publishAllRecipesToPublic(currentLocal);
+      }
+
       localStorage.setItem(`my_recipe_migrated_${user.uid}`, 'true');
+      localStorage.setItem(`my_recipe_admin_migrated_${user.uid}`, 'true');
       setMigrationModal((prev) => ({ ...prev, isOpen: false, isMigrating: false }));
       showToast(`🎉 ${currentLocal.length}개 레시피가 클라우드로 안전하게 업로드되었습니다!`, 'success');
       setSyncStatus('synced');
@@ -818,7 +824,7 @@ export default function App(): React.JSX.Element {
       showToast('클라우드 업로드 중 오류가 발생했습니다. 다시 시도해 주세요.', 'error');
       setMigrationModal((prev) => ({ ...prev, isMigrating: false }));
     }
-  }, [user, showToast, setSyncStatus]);
+  }, [user, isAdmin, showToast, setSyncStatus]);
 
   /**
    * 클라우드 마이그레이션: 로컬과 클라우드 병합
@@ -841,9 +847,14 @@ export default function App(): React.JSX.Element {
         currentShopping
       );
 
+      if (isAdmin) {
+        await publishAllRecipesToPublic(merged);
+      }
+
       setRecipes(merged);
       saveAllRecipes(merged);
       localStorage.setItem(`my_recipe_migrated_${user.uid}`, 'true');
+      localStorage.setItem(`my_recipe_admin_migrated_${user.uid}`, 'true');
       setMigrationModal((prev) => ({ ...prev, isOpen: false, isMigrating: false }));
       showToast(`🎉 기기간 ${merged.length}개의 레시피가 성공적으로 병합되었습니다!`, 'success');
       setSyncStatus('synced');
@@ -852,7 +863,7 @@ export default function App(): React.JSX.Element {
       showToast('레시피 병합 중 오류가 발생했습니다.', 'error');
       setMigrationModal((prev) => ({ ...prev, isMigrating: false }));
     }
-  }, [user, recipes, showToast, setSyncStatus]);
+  }, [user, isAdmin, recipes, showToast, setSyncStatus]);
 
   /**
    * 클라우드 마이그레이션: 클라우드 데이터 우선 사용
@@ -1055,12 +1066,21 @@ export default function App(): React.JSX.Element {
     }) => {
       logger.info('App.handleRestoreComplete', '백업 복원 상태 적용');
       setRecipes(restored.recipes);
+      saveAllRecipes(restored.recipes);
       setBookmarkedIds(restored.bookmarks);
+      saveBookmarks(restored.bookmarks);
       setUserNotes(restored.userNotes);
       setShoppingList(restored.shoppingList);
+      saveShoppingList(restored.shoppingList);
       setRecentRecipeIds(restored.recentIds);
+
+      if (isAdmin) {
+        publishAllRecipesToPublic(restored.recipes).catch((err) => {
+          logger.error('App.handleRestoreComplete', '복원된 레시피 공개 컬렉션 동기화 실패', err);
+        });
+      }
     },
-    []
+    [isAdmin]
   );
 
   return (
@@ -1092,6 +1112,7 @@ export default function App(): React.JSX.Element {
         onInstallPwa={handleInstallPwa}
         isOffline={!isOnline || isOffline}
         user={user}
+        isAdmin={isAdmin}
         syncStatus={syncStatus}
         isLoggingIn={isLoggingIn}
         onLogin={handleGoogleLogin}
@@ -1275,10 +1296,14 @@ export default function App(): React.JSX.Element {
                 setSearchQuery('');
                 setSortOption('default');
               }}
-              onOpenAddRecipe={() => {
-                setRecipeToEdit(null);
-                setIsFormModalOpen(true);
-              }}
+              onOpenAddRecipe={
+                isAdmin
+                  ? () => {
+                      setRecipeToEdit(null);
+                      setIsFormModalOpen(true);
+                    }
+                  : undefined
+              }
             />
 
             {/* Features & Guide Section */}
@@ -1296,23 +1321,26 @@ export default function App(): React.JSX.Element {
         )}
       </main>
 
-      {/* Floating Action Buttons */}
-      <div className="fixed bottom-6 right-6 z-30 flex flex-col items-end gap-2.5">
-        {/* Floating Add Recipe Button */}
-        <button
-          type="button"
-          onClick={() => {
-            logger.info('App', '플로팅 레시피 추가 버튼 클릭');
-            setRecipeToEdit(null);
-            setIsFormModalOpen(true);
-          }}
-          className="flex items-center gap-2 rounded-full bg-gradient-to-r from-orange-500 to-amber-500 px-5 py-3.5 font-soft text-sm font-black text-white shadow-xl shadow-orange-500/30 transition-all hover:scale-105 hover:from-orange-600 hover:to-amber-600 active:scale-95"
-          aria-label="새 레시피 등록하기"
-        >
-          <Plus className="h-5 w-5" />
-          <span>레시피 추가</span>
-        </button>
-      </div>
+      {/* Floating Action Buttons (관리자 전용) */}
+      {isAdmin && (
+        <div className="fixed bottom-6 right-6 z-30 flex flex-col items-end gap-2.5">
+          {/* Floating Add Recipe Button */}
+          <button
+            type="button"
+            onClick={() => {
+              logger.info('App', '플로팅 레시피 추가 버튼 클릭');
+              setRecipeToEdit(null);
+              setIsFormModalOpen(true);
+            }}
+            className="flex items-center gap-2 rounded-full bg-gradient-to-r from-orange-500 to-amber-500 px-5 py-3.5 font-soft text-sm font-black text-white shadow-xl shadow-orange-500/30 transition-all hover:scale-105 hover:from-orange-600 hover:to-amber-600 active:scale-95"
+            aria-label="새 레시피 등록하기"
+            title="새 레시피 등록 (관리자)"
+          >
+            <Plus className="h-5 w-5" />
+            <span>레시피 추가</span>
+          </button>
+        </div>
+      )}
 
       {/* Footer */}
       <Footer />
@@ -1342,6 +1370,7 @@ export default function App(): React.JSX.Element {
           onDeleteRecipe={handleDeleteRecipeRequest}
           onSaveNote={handleSaveRecipeNote}
           onToggleFamilyShare={handleToggleFamilyShareRecipe}
+          isAdmin={isAdmin}
           showToast={showToast}
         />
       )}
