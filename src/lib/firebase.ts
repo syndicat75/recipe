@@ -36,31 +36,48 @@ interface FirebaseConfig {
   firestoreDatabaseId?: string;
 }
 
+// Production Firebase configuration for my-recipe-1569b
+const TARGET_PROJECT_ID = 'my-recipe-1569b';
+const TARGET_AUTH_DOMAIN = 'my-recipe-1569b.firebaseapp.com';
+const TARGET_STORAGE_BUCKET = 'my-recipe-1569b.firebasestorage.app';
+
 /**
- * 환경변수 및 기본 설정 병합
- * Vercel 배포 도메인(recipe-mu-ten.vercel.app)에서는 /__/auth/* 프록시를 통해
- * 서드파티 스토리지 제한(Third-party Storage Partitioning) 없이 First-Party로 안전하게 인증을 처리합니다.
+ * 환경변수 또는 firebase-applet-config.json에서 synd-e4600 잔여물이 유입되지 않도록 정제하는 헬퍼
  */
-const resolveAuthDomain = (): string => {
-  if (import.meta.env.VITE_FIREBASE_AUTH_DOMAIN) {
-    return import.meta.env.VITE_FIREBASE_AUTH_DOMAIN;
+const resolveConfigValue = (
+  envVal: string | undefined,
+  jsonVal: string | undefined,
+  fallback: string
+): string => {
+  if (envVal && !envVal.includes('synd-e4600') && !envVal.includes('synd-')) {
+    return envVal;
   }
-  if (typeof window !== 'undefined' && window.location.hostname === 'recipe-mu-ten.vercel.app') {
-    return 'recipe-mu-ten.vercel.app';
+  if (jsonVal && !jsonVal.includes('synd-e4600') && !jsonVal.includes('synd-')) {
+    return jsonVal;
   }
-  return firebaseAppletConfig.authDomain || 'synd-e4600.firebaseapp.com';
+  return fallback;
 };
 
 const firebaseConfig: FirebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || firebaseAppletConfig.apiKey || '',
-  authDomain: resolveAuthDomain(),
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || firebaseAppletConfig.projectId || 'synd-e4600',
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || firebaseAppletConfig.storageBucket || '',
-  messagingSenderId:
-    import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || firebaseAppletConfig.messagingSenderId || '',
-  appId: import.meta.env.VITE_FIREBASE_APP_ID || firebaseAppletConfig.appId || '',
-  firestoreDatabaseId:
-    import.meta.env.VITE_FIREBASE_DATABASE_ID || firebaseAppletConfig.firestoreDatabaseId || '(default)',
+  apiKey: resolveConfigValue(
+    import.meta.env.VITE_FIREBASE_API_KEY,
+    firebaseAppletConfig.apiKey,
+    'AIzaSyDliA_DSfW0omzUgKcXWnAQQYfCsQMrXFM'
+  ),
+  authDomain: TARGET_AUTH_DOMAIN,
+  projectId: TARGET_PROJECT_ID,
+  storageBucket: TARGET_STORAGE_BUCKET,
+  messagingSenderId: resolveConfigValue(
+    import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+    firebaseAppletConfig.messagingSenderId,
+    '569327742394'
+  ),
+  appId: resolveConfigValue(
+    import.meta.env.VITE_FIREBASE_APP_ID,
+    firebaseAppletConfig.appId,
+    '1:569327742394:web:2c4983c3a3dd41afa9c183'
+  ),
+  firestoreDatabaseId: '(default)',
 };
 
 /**

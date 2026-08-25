@@ -144,9 +144,7 @@
 
 ### 4.1 Firebase Authentication & Cloud Firestore (다기기 실시간 동기화)
 - **Google 간편 로그인 (`useFirebaseAuth.ts`)**:
-  - `GoogleAuthProvider` 및 `signInWithPopup` 우선 연동 (PC 브라우저 최적화).
-  - 모바일 및 설치된 PWA 환경에서 팝업 차단 발생 시 `signInWithRedirect`로 매끄럽게 대체.
-  - Vercel 호스팅 환경(`recipe-mu-ten.vercel.app`)을 고려하여 `vercel.json`의 `/__/auth/*` 리버스 프록시 rewrite 및 First-Party `authDomain` 자동 분기.
+  - `GoogleAuthProvider` 및 `signInWithPopup` 직접 연동 (`projectId: my-recipe-1569b`, `authDomain: my-recipe-1569b.firebaseapp.com`).
   - 로그인 중복 클릭 방지(`isLoggingIn` 상태 및 버튼 disabled), `console.error` 상세 진단 로그 및 에러 코드별 명확한 한국어 Toast 안내.
   - 로그인 성공 시 사용자 프로필(사진, 이름, 이메일) 헤더 반영 및 클라우드 동기화 자동 시작.
   - 로그아웃 시 로컬 데이터 모드로 안전하게 전환하며 기존 데이터는 손실 없이 보존.
