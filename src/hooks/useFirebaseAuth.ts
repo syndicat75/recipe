@@ -220,7 +220,19 @@ export function useFirebaseAuth(): UseFirebaseAuthReturn {
       setSyncStatus('syncing');
 
       try {
-        // PC 및 모바일 브라우저에서 signInWithPopup 직접 호출
+        const isMobileOrPwa = isMobileDevice() || isPwaStandalone();
+
+        if (isMobileOrPwa) {
+          logger.info(
+            'useFirebaseAuth.loginWithGoogle',
+            '모바일/PWA 환경 감지: signInWithRedirect 실행'
+          );
+          await signInWithRedirect(auth, googleProvider);
+          return null;
+        }
+
+        // PC 환경: signInWithPopup 직접 호출
+        logger.info('useFirebaseAuth.loginWithGoogle', 'PC 환경: signInWithPopup 실행');
         const userCredential = await signInWithPopup(auth, googleProvider);
         const fbUser = userCredential.user;
 
@@ -242,7 +254,7 @@ export function useFirebaseAuth(): UseFirebaseAuthReturn {
       } catch (error: unknown) {
         const authErr = error as AuthError;
 
-        // 콘솔에 Firebase Auth 에러 상세 출력
+        // 콘솔에 Firebase Auth 실제 에러 상세 출력
         console.error(
           'Firebase Google login error:',
           authErr.code,
@@ -263,7 +275,7 @@ export function useFirebaseAuth(): UseFirebaseAuthReturn {
           return null;
         }
 
-        // auth/unauthorized-domain, auth/popup-blocked 등 모든 오류를 Toast 및 상태에 즉시 반영
+        // auth/unauthorized-domain, auth/popup-blocked 등 모든 실제 오류를 Toast 및 상태에 즉시 반영
         if (onErrorToast) {
           onErrorToast(friendlyMessage);
         }

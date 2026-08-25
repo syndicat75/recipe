@@ -143,13 +143,21 @@
 ## 4. 데이터 영속성, 클라우드 동기화 및 보안 (Data Persistence & Cloud Sync)
 
 ### 4.1 Firebase Authentication & Cloud Firestore (다기기 실시간 동기화)
-- **Google 간편 로그인 (`useFirebaseAuth.ts`)**:
-  - `GoogleAuthProvider` 및 `signInWithPopup` 직접 연동 (`projectId: my-recipe-1569b`, `authDomain: my-recipe-1569b.firebaseapp.com`).
-  - 로그인 중복 클릭 방지(`isLoggingIn` 상태 및 버튼 disabled), `console.error` 상세 진단 로그 및 에러 코드별 명확한 한국어 Toast 안내.
+- **Firebase 전용 Named App 격리 (`firebase.ts`)**:
+  - `FIREBASE_APP_NAME = 'my-recipe-client'`를 사용하여 기본 `[DEFAULT]` 인스턴스와 격리된 `my-recipe-1569b` 공식 설정을 단일 Source of Truth로 유지.
+  - 앱 시작 시 실제 `firebaseApp.options` 및 Identity Toolkit API 기반 Authorized Domains 진단 로깅 자동 실행.
+- **플랫폼별 최적화 로그인 (`useFirebaseAuth.ts`)**:
+  - **PC 환경**: `signInWithPopup` 직접 호출. 오류 발생 시 원형 그대로 `console.error` 출력.
+  - **모바일/PWA 환경**: `signInWithRedirect` 및 `getRedirectResult`를 통한 안정적인 인증 흐름.
+  - 로그인 중복 클릭 방지(`isLoggingIn` 상태 및 버튼 disabled), 에러 코드별 명확한 한국어 Toast 안내.
   - 로그인 성공 시 사용자 프로필(사진, 이름, 이메일) 헤더 반영 및 클라우드 동기화 자동 시작.
   - 로그아웃 시 로컬 데이터 모드로 안전하게 전환하며 기존 데이터는 손실 없이 보존.
 - **Firestore 다중 탭 및 오프라인 영속성 (`firebase.ts`)**:
   - `persistentLocalCache` + `persistentMultipleTabManager`를 적용하여 네트워크가 끊겨도 로컬 캐시에서 즉시 동작하고 재연결 시 자동 동기화.
+- **PWA Service Worker (`public/sw.js`)**:
+  - `my-recipe-cache-v2.1` 적용.
+  - Navigation 및 HTML 문서는 **Network First**로 최신 배포본을 즉시 반영하며 오프라인 시 캐시 폴백.
+  - 구버전 캐시 자동 정리 (`activate` 단계).
 - **사용자 격리 보안 규칙 (`firestore.rules`)**:
   - `match /users/{userId}/{document=**} { allow read, write: if request.auth != null && request.auth.uid == userId; }`
   - 각 사용자는 자신의 UID 서브컬렉션에만 안전하게 접근 가능.
