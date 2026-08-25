@@ -1,15 +1,13 @@
 /**
  * @file src/hooks/useFirebaseAuth.ts
  * @description Firebase Authentication 상태 관리 훅 (Google 로그인/로그아웃, 세션 감지, 온라인/오프라인 네트워크 감지 및 동기화 상태)
- * PC에서는 팝업 방식을 우선 사용하며, 모바일/PWA 환경 및 Vercel 프록시 호스팅 환경에 최적화된 인증 흐름을 제공합니다.
+ * PC 및 모바일/PWA 환경 모두에서 일관되게 signInWithPopup을 사용하여 즉각적인 인증 상태 갱신과 온디바이스 안정성을 제공합니다.
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   onAuthStateChanged,
   signInWithPopup,
-  signInWithRedirect,
-  getRedirectResult,
   signOut,
   User,
   AuthError,
@@ -19,7 +17,7 @@ import { FirebaseAuthUser, SyncStatus } from '../types/firebase';
 import { logger } from '../utils/logger';
 
 /**
- * 모바일 디바이스 여부 감지
+ * 모바일 디바이스 여부 감지 유틸리티 (필요 시 향후 확장을 위해 보존)
  */
 export const isMobileDevice = (): boolean => {
   if (typeof window === 'undefined') return false;
@@ -29,7 +27,7 @@ export const isMobileDevice = (): boolean => {
 };
 
 /**
- * 설치된 PWA(Standalone 모드) 여부 감지
+ * 설치된 PWA(Standalone 모드) 여부 감지 유틸리티 (필요 시 향후 확장을 위해 보존)
  */
 export const isPwaStandalone = (): boolean => {
   if (typeof window === 'undefined') return false;
@@ -48,11 +46,11 @@ export function getFirebaseAuthErrorMessage(error: unknown): string {
 
   switch (code) {
     case 'auth/popup-blocked':
-      return '브라우저가 Google 로그인 창을 차단했습니다. 팝업 차단을 해제해 주세요.';
-    case 'auth/unauthorized-domain':
-      return '현재 도메인이 Firebase Authentication에 승인되지 않았습니다.';
+      return '브라우저가 Google 로그인 창을 차단했습니다.';
     case 'auth/popup-closed-by-user':
       return 'Google 로그인이 취소되었습니다.';
+    case 'auth/unauthorized-domain':
+      return '현재 도메인이 Firebase 인증에 승인되지 않았습니다.';
     case 'auth/network-request-failed':
       return '네트워크 연결을 확인해 주세요.';
     case 'auth/cancelled-popup-request':
@@ -130,7 +128,7 @@ export function useFirebaseAuth(): UseFirebaseAuthReturn {
     };
   }, [user]);
 
-  // 2. Firebase Auth 상태 변화 구독 및 리다이렉트 결과 처리 (초기 1회 안전 실행)
+  // 2. Firebase Auth 상태 변화 리스너 (onAuthStateChanged를 단일 진실 공급원으로 사용)
   useEffect(() => {
     if (!auth || !isFirebaseReady) {
       logger.info(
@@ -142,31 +140,8 @@ export function useFirebaseAuth(): UseFirebaseAuthReturn {
       return;
     }
 
-    logger.info('useFirebaseAuth.init', 'Firebase Auth 상태 리스너 등록');
+    logger.info('useFirebaseAuth.init', 'Firebase onAuthStateChanged 리스너 등록');
 
-    // 리다이렉트 로그인 결과 안전하게 처리 (getRedirectResult)
-    getRedirectResult(auth)
-      .then((result) => {
-        if (result && result.user) {
-          logger.info(
-            'useFirebaseAuth.redirect',
-            `리다이렉트 로그인 성공: ${result.user.displayName || result.user.email} (UID: ${result.user.uid})`
-          );
-        }
-      })
-      .catch((error: unknown) => {
-        const err = error as AuthError;
-        if (err && err.code !== 'auth/null-user') {
-          console.error(
-            'Firebase Google redirect result error:',
-            err.code,
-            err.message,
-            err
-          );
-        }
-      });
-
-    // onAuthStateChanged 단일 진실 공급원
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser: User | null) => {
       if (firebaseUser) {
         logger.info(
@@ -195,8 +170,8 @@ export function useFirebaseAuth(): UseFirebaseAuthReturn {
 
   /**
    * Google 로그인 핸들러
-   * 사용자 클릭 이벤트에서 직접 동기적으로 시작되며, 중복 클릭을 방지하고
-   * 에러 발생 시 상세 로그 및 Toast 메시지를 지원합니다.
+   * 사용자 클릭 이벤트에서 직접 signInWithPopup을 호출하여
+   * PC Chrome, Android Chrome, 모바일 브라우저 및 PWA 환경에서 일관된 로그인 처리를 수행합니다.
    */
   const loginWithGoogle = useCallback(
     async (onErrorToast?: (msg: string) => void): Promise<FirebaseAuthUser | null> => {
@@ -220,26 +195,19 @@ export function useFirebaseAuth(): UseFirebaseAuthReturn {
       setSyncStatus('syncing');
 
       try {
-        const isMobileOrPwa = isMobileDevice() || isPwaStandalone();
-
-        if (isMobileOrPwa) {
-          logger.info(
-            'useFirebaseAuth.loginWithGoogle',
-            '모바일/PWA 환경 감지: signInWithRedirect 실행'
-          );
-          await signInWithRedirect(auth, googleProvider);
-          return null;
-        }
-
-        // PC 환경: signInWithPopup 직접 호출
-        logger.info('useFirebaseAuth.loginWithGoogle', 'PC 환경: signInWithPopup 실행');
+        // 모든 웹 환경(PC, Android Chrome, 모바일 브라우저, PWA)에서 signInWithPopup 호출
         const userCredential = await signInWithPopup(auth, googleProvider);
         const fbUser = userCredential.user;
 
-        logger.info(
-          'useFirebaseAuth.loginWithGoogle',
-          `Google 팝업 로그인 성공: ${fbUser.displayName || fbUser.email}`
-        );
+        // popup 완료 진단 로그 출력
+        const maskedEmail = fbUser.email
+          ? `${fbUser.email.slice(0, 3)}***@${fbUser.email.split('@')[1] || ''}`
+          : 'N/A';
+        console.log('[Firebase.auth] popup completed', {
+          uid: fbUser.uid,
+          email: maskedEmail,
+          'auth.currentUser': Boolean(auth.currentUser),
+        });
 
         const loggedInUser: FirebaseAuthUser = {
           uid: fbUser.uid,
@@ -257,17 +225,17 @@ export function useFirebaseAuth(): UseFirebaseAuthReturn {
         // 콘솔에 Firebase Auth 실제 에러 상세 출력
         console.error(
           'Firebase Google login error:',
-          authErr.code,
-          authErr.message,
+          authErr?.code,
+          authErr?.message,
           authErr
         );
 
         const friendlyMessage = getFirebaseAuthErrorMessage(authErr);
 
-        // 사용자가 단순히 창을 닫은 경우(popup-closed-by-user)나 취소인 경우 상태만 원상복구
+        // 사용자가 단순히 창을 닫은 경우(popup-closed-by-user)나 취소인 경우 상태 원상복구
         if (
-          authErr.code === 'auth/popup-closed-by-user' ||
-          authErr.code === 'auth/cancelled-popup-request'
+          authErr?.code === 'auth/popup-closed-by-user' ||
+          authErr?.code === 'auth/cancelled-popup-request'
         ) {
           logger.info('useFirebaseAuth.loginWithGoogle', '사용자에 의한 로그인 팝업 취소');
           setSyncStatus(user ? 'synced' : 'local-only');
@@ -275,7 +243,7 @@ export function useFirebaseAuth(): UseFirebaseAuthReturn {
           return null;
         }
 
-        // auth/unauthorized-domain, auth/popup-blocked 등 모든 실제 오류를 Toast 및 상태에 즉시 반영
+        // auth/unauthorized-domain, auth/popup-blocked, auth/network-request-failed 등 Toast 및 상태 반영
         if (onErrorToast) {
           onErrorToast(friendlyMessage);
         }

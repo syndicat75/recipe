@@ -146,10 +146,11 @@
 - **Firebase 전용 Named App 격리 (`firebase.ts`)**:
   - `FIREBASE_APP_NAME = 'my-recipe-client'`를 사용하여 기본 `[DEFAULT]` 인스턴스와 격리된 `my-recipe-1569b` 공식 설정을 단일 Source of Truth로 유지.
   - 앱 시작 시 실제 `firebaseApp.options` 및 Identity Toolkit API 기반 Authorized Domains 진단 로깅 자동 실행.
-- **플랫폼별 최적화 로그인 (`useFirebaseAuth.ts`)**:
-  - **PC 환경**: `signInWithPopup` 직접 호출. 오류 발생 시 원형 그대로 `console.error` 출력.
-  - **모바일/PWA 환경**: `signInWithRedirect` 및 `getRedirectResult`를 통한 안정적인 인증 흐름.
-  - 로그인 중복 클릭 방지(`isLoggingIn` 상태 및 버튼 disabled), 에러 코드별 명확한 한국어 Toast 안내.
+- **Google 간편 로그인 (`useFirebaseAuth.ts`)**:
+  - **PC 및 모바일/PWA 공통**: 버튼 클릭 시 `signInWithPopup` 직접 호출로 일관된 인증 플로우 보장.
+  - 리다이렉트 프록시 부재로 인한 모바일 인증 복귀 실패 문제를 원천 차단하고, `onAuthStateChanged` 단일 소스로 `user` 상태와 헤더를 즉시 동기화.
+  - 로그인 성공 시 `[Firebase.auth] popup completed` 진단 로그 (UID, 마스킹 이메일, `auth.currentUser`) 출력.
+  - 로그인 중복 클릭 방지(`isLoggingIn` 상태 및 버튼 disabled), `finally`에서 로딩 상태 완벽 복구, 에러 코드별 명확한 한국어 Toast 안내.
   - 로그인 성공 시 사용자 프로필(사진, 이름, 이메일) 헤더 반영 및 클라우드 동기화 자동 시작.
   - 로그아웃 시 로컬 데이터 모드로 안전하게 전환하며 기존 데이터는 손실 없이 보존.
 - **Firestore 다중 탭 및 오프라인 영속성 (`firebase.ts`)**:
