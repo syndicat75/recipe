@@ -23,11 +23,23 @@ export const APP_CONFIG = {
     recipeNotes: 'my_recipe_user_notes_v1',
     recentRecipes: 'my_recipe_recent_viewed_v1',
     theme: 'my_recipe_theme_preference_v1',
+    /** 주간 식단표 저장 키 */
+    weeklyMealPlan: 'my_recipe_weekly_meal_plan_v1',
+    /** 오늘 뭐 먹지 최근 추천 ID 목록 (중복 최소화용) */
+    recentRecommendations: 'my_recipe_recent_recommendations_v1',
+    /** 요리 진행상황 저장 키 (레시피 ID별 단계 체크) */
+    cookingProgress: 'my_recipe_cooking_progress_v1',
+    /** 가족 사용자 프로필 키 */
+    familyProfile: 'my_recipe_family_profile_v1',
+    /** 가족 공간 캐시 키 */
+    familySpaces: 'my_recipe_family_spaces_v1',
   },
   ai: {
     model: 'gemini-3.7-flash',
     importEndpoint: '/api/ai/import-recipe',
+    importImageEndpoint: '/api/ai/import-recipe-image',
     askEndpoint: '/api/ai/ask-recipe',
+    recommendEndpoint: '/api/ai/recommend-menu',
     quickQuestions: [
       { id: 'substitute', label: '🥬 대체 재료', prompt: '대체할 수 있는 다른 재료나 양념이 있나요?' },
       { id: 'tastier', label: '👨‍🍳 더 맛있게', prompt: '더 맛있고 감칠맛 나게 만드는 셰프의 특급 비법 꿀팁을 알려주세요.' },

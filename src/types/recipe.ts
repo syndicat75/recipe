@@ -39,6 +39,12 @@ export interface Recipe {
   cookingTimeMinutes?: number;
   /** 난이도 - 선택 */
   difficulty?: '쉬움' | '보통' | '어려움';
+  /** 기준 인분 수 (선택, 기본 2인분 등으로 설정 가능) */
+  baseServings?: number;
+  /** 가족 공간에 공유 여부 (선택, 기본 false) */
+  sharedWithFamily?: boolean;
+  /** 원본 촬영/참고 사진 (선택) */
+  sourceImageUrl?: string;
   /** 사용자 생성 또는 커스텀 수정 레시피 여부 */
   isCustom?: boolean;
   /** 즐겨찾기 등록 여부 (기본 false) */
@@ -49,6 +55,120 @@ export interface Recipe {
   createdAt?: number;
   /** 등록/수정 일시 타임스탬프 또는 ISO 문자열 */
   updatedAt?: number | string;
+}
+
+/**
+ * 식단 식사 시간 슬롯 타입
+ */
+export type MealSlotType = 'breakfast' | 'lunch' | 'dinner' | 'single';
+
+/**
+ * 단일 식단 항목 인터페이스
+ */
+export interface MealPlanEntry {
+  /** 식단 항목 고유 ID */
+  id: string;
+  /** 날짜 문자열 (YYYY-MM-DD) */
+  date: string;
+  /** 식사 슬롯 ('breakfast' | 'lunch' | 'dinner' | 'single') */
+  slot: MealSlotType;
+  /** 참조하는 레시피 고유 ID */
+  recipeId: number;
+  /** 사용자 지정 보조 제목 또는 메모 (선택) */
+  customTitle?: string;
+  /** 인분 수 설정 (선택, 기본 2) */
+  servings?: number;
+  /** 생성 일시 타임스탬프 */
+  createdAt: number;
+  /** 수정 일시 타임스탬프 */
+  updatedAt?: number;
+}
+
+/**
+ * 날짜별 식단 항목 맵 (키: YYYY-MM-DD)
+ */
+export type WeeklyMealPlan = Record<string, MealPlanEntry[]>;
+
+/**
+ * 요리 진행 상황 저장 인터페이스
+ */
+export interface CookingProgressState {
+  /** 레시피 ID */
+  recipeId: number;
+  /** 현재 진행 중인 단계 인덱스 */
+  currentStepIndex: number;
+  /** 완료된 단계 인덱스 목록 */
+  completedStepIndices: number[];
+  /** 마지막 업데이트 일시 */
+  lastUpdated: number;
+}
+
+/**
+ * 활성 타이머 인터페이스 (종료 예정 시각 기반)
+ */
+export interface ActiveTimerItem {
+  /** 타이머 고유 ID */
+  id: string;
+  /** 타이머 이름/라벨 (예: "된장찌개 끓이기") */
+  label: string;
+  /** 타이머 총 설정 초 */
+  totalSeconds: number;
+  /** 종료 예정 절대 타임스탬프 (Date.now() + 남은밀리초) */
+  targetTimestamp: number;
+  /** 일시정지 여부 */
+  isPaused?: boolean;
+  /** 일시정지 시점의 남은 초 */
+  remainingSecondsOnPause?: number;
+}
+
+/**
+ * 가족 구성원 인터페이스
+ */
+export interface FamilyMember {
+  /** 사용자 ID */
+  id: string;
+  /** 사용자 닉네임 */
+  name: string;
+  /** 역할 ('owner' | 'member') */
+  role: 'owner' | 'member';
+  /** 프로필 이모지 */
+  avatar?: string;
+  /** 참여 일시 */
+  joinedAt: number;
+}
+
+/**
+ * 가족 공간 데이터 인터페이스
+ */
+export interface FamilySpace {
+  /** 가족 공간 고유 ID */
+  familyId: string;
+  /** 가족 공간 이름 */
+  name: string;
+  /** 6자리 초대 코드 (예: FAM-8X2K9L) */
+  inviteCode: string;
+  /** 방장 사용자 ID */
+  ownerId: string;
+  /** 참여 구성원 목록 */
+  members: FamilyMember[];
+  /** 생성 일시 */
+  createdAt: number;
+  /** 최종 동기화/수정 일시 */
+  updatedAt: number;
+}
+
+/**
+ * 사용자 가족 계정 프로필
+ */
+export interface FamilyUserProfile {
+  /** 고유 사용자 ID */
+  id: string;
+  /** 사용자 닉네임 */
+  name: string;
+  /** 현재 참여 중인 가족 공간 ID (없으면 null) */
+  currentFamilyId: string | null;
+  /** 프로필 이모지 */
+  avatar?: string;
 }
 
 /**

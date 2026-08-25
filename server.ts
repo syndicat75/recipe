@@ -233,6 +233,169 @@ ${recipe.userNotes ? `- 사용자의 나만의 메모: ${recipe.userNotes}` : ''
     }
   });
 
+  /**
+   * 사진/이미지(요리책, 포장지, 손글씨 메모, 캡처 등)에서 레시피 추출 엔드포인트
+   * 사진에 있는 정보를 있는 그대로 읽고 구조화 (상상이나 임의 창작 엄격히 금지)
+   */
+  app.post('/api/ai/import-recipe-image', async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { imageBase64, mimeType = 'image/jpeg' } = req.body as {
+        imageBase64?: string;
+        mimeType?: string;
+      };
+
+      if (!imageBase64) {
+        res.status(400).json({ error: '이미지 데이터(Base64)가 필요합니다.' });
+        return;
+      }
+
+      // Base64 프리픽스(data:image/jpeg;base64,) 제거
+      const cleanedBase64 = imageBase64.replace(/^data:image\/[a-zA-Z0-9+.-]+;base64,/, '');
+
+      const prompt = `당신은 이미지 속의 요리 레시피 텍스트를 정확하게 읽어내는 OCR 및 레시피 구조화 전문가입니다.
+첨부된 사진(요리책 페이지, 손글씨 메모, 제품 포장지, 캡처본 등)을 꼼꼼히 분석하여 레시피 정보만 정확히 추출해 JSON으로 반환하세요.
+
+[절대적인 추출 원칙 - 엄격 준수]
+1. 사진에 실제로 적혀 있는 정보만 읽어서 기록하세요. 절대로 새로운 레시피를 창작하거나 임의로 수량을 개선하지 마세요.
+2. 사진에 '간장'이라고만 적혀 있으면 '간장'으로만 추출하세요. 임의로 '간장 1큰술'로 추측해서 채우지 마세요.
+3. 글씨가 흐리거나 잘 보이지 않는 부분은 글자 뒤에 '(확인 필요)' 또는 '?'를 붙이고, lowConfidenceFields 배열에 해당 필드명(예: 'ingredients', 'cookingTimeMinutes' 등)을 추가하세요.
+4. 카테고리는 다음 중 가장 적절한 1개를 선택하세요: '반찬', '소스·양념', '국·찌개', '중식·양식', '밥·한그릇', '계란요리', '기타'
+5. 기준 인분 정보가 사진에 명시되어 있다면 baseServings(숫자)로 추출하고, 없으면 2로 지정하세요.
+6. 재료(ingredients)는 줄바꿈(\\n)으로 구분된 하나의 문자열로 작성하세요. (예: "돼지고기 150g\\n신김치 1/4포기\\n두부 1/2모")
+7. 조리법(method)은 각 단계를 번호와 줄바꿈(\\n)으로 구분하여 작성하세요.`;
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-3.7-flash',
+        contents: [
+          {
+            text: prompt,
+          },
+          {
+            inlineData: {
+              mimeType: mimeType,
+              data: cleanedBase64,
+            },
+          },
+        ],
+        config: {
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              name: { type: Type.STRING, description: '요리 이름' },
+              category: {
+                type: Type.STRING,
+                description: '카테고리 (반찬, 소스·양념, 국·찌개, 중식·양식, 밥·한그릇, 계란요리, 기타)',
+              },
+              icon: { type: Type.STRING, description: '가장 잘 어울리는 음식 단일 이모지 (예: 🥘, 🍛)' },
+              baseServings: { type: Type.INTEGER, description: '사진에 적힌 기준 인분 수 (명시 없으면 2)' },
+              ingredients: { type: Type.STRING, description: '재료 목록 (줄바꿈 구분)' },
+              method: { type: Type.STRING, description: '조리 순서 (번호와 줄바꿈 구분)' },
+              cookingTimeMinutes: { type: Type.INTEGER, description: '조리 시간 (분)' },
+              difficulty: {
+                type: Type.STRING,
+                enum: ['쉬움', '보통', '어려움'],
+                description: '난이도',
+              },
+              tip: { type: Type.STRING, description: '사진에 적힌 조리 팁 또는 보조 메모' },
+              lowConfidenceFields: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING },
+                description: '글씨가 흐리거나 판독이 불확실했던 필드명 목록',
+              },
+            },
+            required: ['name', 'category', 'icon', 'ingredients', 'method'],
+          },
+        },
+      });
+
+      const rawJson = response.text;
+      if (!rawJson) {
+        throw new Error('AI 모델로부터 빈 응답을 받았습니다.');
+      }
+
+      const parsedData = JSON.parse(rawJson);
+
+      res.json({
+        success: true,
+        recipe: parsedData,
+      });
+    } catch (error) {
+      console.error('Error importing recipe from image:', error);
+      res.status(500).json({
+        success: false,
+        error: '사진에서 레시피를 분석하는 중 오류가 발생했습니다. 사진이 선명한지 확인 후 다시 시도해주세요.',
+        details: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  /**
+   * 오늘 뭐 먹지 - AI 자연어 추천 엔드포인트
+   * 사용자의 기분/보유재료/상황을 바탕으로 사용자가 저장한 레시피 풀 중에서만 최적의 메뉴를 선별 추천
+   */
+  app.post('/api/ai/recommend-menu', async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { userPrompt, candidateRecipes } = req.body as {
+        userPrompt: string;
+        candidateRecipes: Array<{ id: number; name: string; category: string; ingredients: string }>;
+      };
+
+      if (!userPrompt || !userPrompt.trim()) {
+        res.status(400).json({ error: '추천 요청 내용을 입력해주세요.' });
+        return;
+      }
+
+      if (!candidateRecipes || candidateRecipes.length === 0) {
+        res.status(400).json({ error: '후보 레시피 목록이 비어있습니다.' });
+        return;
+      }
+
+      const prompt = `사용자가 오늘 먹을 메뉴를 고르지 못해 도움을 요청했습니다.
+사용자의 요청 사항을 분석하여 [사용자의 저장된 레시피 목록] 중에서 가장 잘 어울리는 메뉴 1개를 골라 추천 이유와 함께 제시하세요.
+
+[사용자 요청/기분/재료]: "${userPrompt.trim()}"
+
+[사용자의 저장된 레시피 목록]:
+${candidateRecipes.map((r) => `- [ID: ${r.id}] ${r.name} (${r.category}) / 주요재료: ${r.ingredients.substring(0, 80)}...`).join('\n')}
+
+[규칙]:
+1. 반드시 위의 [사용자의 저장된 레시피 목록]에 실제로 존재하는 레시피의 ID 1개만 골라야 합니다. 없는 요리를 지어내지 마세요.
+2. 만약 사용자의 요청(예: "파스타")과 맞는 요리가 저장된 레시피에 전혀 없다면 recommendedRecipeId를 null로 하고 reason에 "현재 저장된 레시피에는 정확히 맞는 음식이 없지만, 가장 가까운 메뉴로 OOO을 추천합니다" 식으로 안내하세요.
+3. 친절하고 입맛 돋우는 셰프 톤으로 2~3줄의 간결한 추천 이유(reason)를 작성하세요.`;
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-3.7-flash',
+        contents: prompt,
+        config: {
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              recommendedRecipeId: { type: Type.INTEGER, description: '추천할 레시피 ID (맞는 게 없으면 null)' },
+              reason: { type: Type.STRING, description: '친절하고 입맛 돋우는 추천 이유 2~3문장' },
+            },
+            required: ['reason'],
+          },
+        },
+      });
+
+      const parsed = JSON.parse(response.text || '{}');
+      res.json({
+        success: true,
+        recommendedRecipeId: parsed.recommendedRecipeId ?? null,
+        reason: parsed.reason || '오늘 식사로 딱 맞는 메뉴를 골랐습니다!',
+      });
+    } catch (error) {
+      console.error('Error recommending menu:', error);
+      res.status(500).json({
+        success: false,
+        error: 'AI 메뉴 추천 중 오류가 발생했습니다.',
+        details: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
   // Vite 개발 미들웨어 또는 정적 파일 서빙 설정
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({

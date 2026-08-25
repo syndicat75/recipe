@@ -1,9 +1,10 @@
 /**
  * @file src/components/Header.tsx
- * @description 웹앱 상단 네비게이션 바, 브랜드 로고, 즐겨찾기/장보기/레시피 추가/데이터 백업/타이머 빠른 실행 및 모바일 반응형 메뉴
+ * @description 웹앱 상단 네비게이션 바, 브랜드 로고, 오늘 뭐 먹지(🎲), 주간 식단표(📅), AI 요리사(✨),
+ * 가족 공유 공간(👨‍👩‍👧), 즐겨찾기, 장보기, 레시피 추가/가져오기, 데이터 백업 및 주방 타이머 버튼 지원
  */
 
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   Bookmark,
   ShoppingCart,
@@ -18,9 +19,21 @@ import {
   Sparkles,
   Download,
   WifiOff,
+  Dice5,
+  Calendar,
+  Users,
+  Camera,
+  LogIn,
+  LogOut,
+  Cloud,
+  CloudCheck,
+  RefreshCw,
+  AlertCircle,
+  User as UserIcon,
 } from 'lucide-react';
 import { APP_CONFIG } from '../config/appConfig';
 import { FilterCategory } from '../types/recipe';
+import { FirebaseAuthUser, SyncStatus } from '../types/firebase';
 import { logger } from '../utils/logger';
 
 interface HeaderProps {
@@ -28,10 +41,10 @@ interface HeaderProps {
   currentCategory: FilterCategory;
   /** 카테고리 선택 핸들러 */
   onSelectCategory: (category: FilterCategory) => void;
-  /** 현재 활성 뷰 (홈/레시피 vs AI 요리사) */
-  currentView?: 'home' | 'ai-chef';
+  /** 현재 활성 뷰 (홈/레시피 vs AI 요리사 vs 주간 식단표) */
+  currentView?: 'home' | 'ai-chef' | 'meal-plan';
   /** 뷰 전환 핸들러 */
-  onNavigateView?: (view: 'home' | 'ai-chef') => void;
+  onNavigateView?: (view: 'home' | 'ai-chef' | 'meal-plan') => void;
   /** 즐겨찾기 레시피 개수 */
   bookmarkCount: number;
   /** 장보기 목록 아이템 개수 */
@@ -42,6 +55,12 @@ interface HeaderProps {
   onOpenAddRecipe: () => void;
   /** 외부 레시피 AI 가져오기 모달 열기 핸들러 */
   onOpenImportRecipe: () => void;
+  /** 오늘 뭐 먹지 룰렛/AI 모달 열기 핸들러 */
+  onOpenTodayMenu: () => void;
+  /** 가족 공유 모달 열기 핸들러 */
+  onOpenFamilyShare: () => void;
+  /** 참여 중인 가족 공간 이름 (없으면 null) */
+  currentFamilyName?: string | null;
   /** 백업/복원 모달 열기 핸들러 */
   onOpenBackupRestore: () => void;
   /** 타이머 위젯 토글 핸들러 */
@@ -54,6 +73,16 @@ interface HeaderProps {
   onInstallPwa?: () => void;
   /** 오프라인 여부 */
   isOffline?: boolean;
+  /** Firebase 로그인된 사용자 정보 */
+  user?: FirebaseAuthUser | null;
+  /** 클라우드 동기화 상태 */
+  syncStatus?: SyncStatus;
+  /** Google 로그인 핸들러 */
+  onLogin?: () => void;
+  /** 로그아웃 핸들러 */
+  onLogout?: () => void;
+  /** 클라우드 동기화 모달 열기 */
+  onOpenCloudSyncModal?: () => void;
 }
 
 /**
@@ -69,17 +98,38 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenShoppingList,
   onOpenAddRecipe,
   onOpenImportRecipe,
+  onOpenTodayMenu,
+  onOpenFamilyShare,
+  currentFamilyName,
   onOpenBackupRestore,
   onToggleTimer,
   isTimerOpen,
   canInstallPwa,
   onInstallPwa,
   isOffline = false,
+  user = null,
+  syncStatus = 'local-only',
+  onLogin,
+  onLogout,
+  onOpenCloudSyncModal,
 }) => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const userMenuRef = useRef<HTMLDivElement>(null);
+
+  // 외부 클릭 시 유저 드롭다운 닫기
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (userMenuRef.current && !userMenuRef.current.contains(e.target as Node)) {
+        setIsUserMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   /**
-   * 모바일 메뉴 토글 이벤트 핸들러
+   * 모바일 메뉴 토글
    */
   const handleToggleMobileMenu = (): void => {
     logger.info('Header.handleToggleMobileMenu', `모바일 메뉴 토글: ${!isMobileMenuOpen}`);
@@ -87,8 +137,7 @@ export const Header: React.FC<HeaderProps> = ({
   };
 
   /**
-   * 네비게이션 링크 클릭 이벤트 핸들러
-   * @param targetCategory 선택한 카테고리
+   * 홈 뷰 및 카테고리 이동
    */
   const handleNavClick = (targetCategory: FilterCategory): void => {
     logger.info('Header.handleNavClick', `네비게이션 클릭: ${targetCategory}`);
@@ -98,17 +147,7 @@ export const Header: React.FC<HeaderProps> = ({
   };
 
   /**
-   * AI 요리사 화면으로 이동
-   */
-  const handleGoToAiChef = (): void => {
-    logger.info('Header.handleGoToAiChef', 'AI 요리사 메뉴 클릭');
-    if (onNavigateView) onNavigateView('ai-chef');
-    setIsMobileMenuOpen(false);
-  };
-
-  /**
    * 특정 섹션으로 스크롤 이동
-   * @param id 타겟 요소 ID
    */
   const scrollToSection = (id: string): void => {
     logger.info('Header.scrollToSection', `스크롤 이동: #${id}`);
@@ -169,21 +208,56 @@ export const Header: React.FC<HeaderProps> = ({
           >
             홈
           </button>
+
+          {/* 🎲 오늘 뭐 먹지? 버튼 */}
           <button
             type="button"
             onClick={() => {
-              if (onNavigateView) onNavigateView('home');
-              onSelectCategory('전체');
-              scrollToSection('recipes');
+              logger.info('Header', '오늘 뭐 먹지 클릭');
+              onOpenTodayMenu();
             }}
-            className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${
-              currentView === 'home' && currentCategory === '전체'
-                ? 'text-stone-700 hover:bg-orange-100'
+            className="flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-bold text-orange-700 bg-orange-50 hover:bg-orange-100 border border-orange-200/70 transition shadow-2xs"
+            title="고민될 때 랜덤 룰렛 또는 AI 추천받기"
+          >
+            <Dice5 className="h-3.5 w-3.5 text-orange-500" />
+            <span>오늘 뭐 먹지?</span>
+          </button>
+
+          {/* 📅 주간 식단표 탭 */}
+          <button
+            type="button"
+            onClick={() => {
+              if (onNavigateView) onNavigateView('meal-plan');
+            }}
+            className={`flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-semibold transition ${
+              currentView === 'meal-plan'
+                ? 'bg-orange-500 text-white font-bold shadow-xs'
                 : 'text-stone-600 hover:bg-orange-100 hover:text-orange-800'
             }`}
+            title="월~일 아침/점심/저녁 식단표 계획 및 장보기 생성"
           >
-            전체 레시피
+            <Calendar className="h-3.5 w-3.5" />
+            <span>주간 식단표</span>
           </button>
+
+          {/* ✨ AI 요리사 정식 메뉴 버튼 (PC) */}
+          <button
+            type="button"
+            onClick={() => {
+              if (onNavigateView) onNavigateView('ai-chef');
+            }}
+            className={`flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-bold transition shadow-2xs ${
+              currentView === 'ai-chef'
+                ? 'bg-gradient-to-r from-orange-500 to-amber-500 text-white shadow-xs'
+                : 'bg-orange-50/90 text-orange-800 hover:bg-orange-100 hover:text-orange-900 border border-orange-200/60'
+            }`}
+            title="요리 고민이나 팁을 무엇이든 물어보는 AI 요리사"
+          >
+            <Sparkles className={`h-3.5 w-3.5 ${currentView === 'ai-chef' ? 'text-amber-200' : 'text-orange-600'}`} />
+            <span>✨ AI 요리사</span>
+          </button>
+
+          {/* 즐겨찾기 */}
           <button
             type="button"
             onClick={() => {
@@ -206,19 +280,19 @@ export const Header: React.FC<HeaderProps> = ({
             )}
           </button>
 
-          {/* ✨ AI 요리사 정식 메뉴 버튼 (PC) */}
+          {/* 👨‍👩‍👧 가족 공간 */}
           <button
             type="button"
-            onClick={handleGoToAiChef}
-            className={`flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-bold transition shadow-2xs ${
-              currentView === 'ai-chef'
-                ? 'bg-gradient-to-r from-orange-500 to-amber-500 text-white shadow-xs'
-                : 'bg-orange-50/90 text-orange-800 hover:bg-orange-100 hover:text-orange-900 border border-orange-200/60'
+            onClick={onOpenFamilyShare}
+            className={`flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-bold transition ${
+              currentFamilyName
+                ? 'bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100'
+                : 'text-stone-600 hover:bg-orange-100 hover:text-orange-800'
             }`}
-            title="요리 고민이나 팁을 무엇이든 물어보는 AI 요리사"
+            title="가족 공유 공간"
           >
-            <Sparkles className={`h-3.5 w-3.5 ${currentView === 'ai-chef' ? 'text-amber-200' : 'text-orange-600'}`} />
-            <span>✨ AI 요리사</span>
+            <Users className="h-3.5 w-3.5 text-rose-500" />
+            <span>{currentFamilyName ? currentFamilyName : '가족 공간'}</span>
           </button>
 
           {/* External Recipe Import Button */}
@@ -229,9 +303,10 @@ export const Header: React.FC<HeaderProps> = ({
               onOpenImportRecipe();
             }}
             className="flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-semibold text-stone-600 transition hover:bg-orange-100 hover:text-orange-800"
-            title="웹페이지 URL이나 텍스트에서 AI로 레시피 가져오기"
+            title="웹페이지 URL, 텍스트 또는 사진에서 AI로 레시피 가져오기"
           >
-            <span>레시피 가져오기</span>
+            <Camera className="h-3.5 w-3.5 text-orange-500" />
+            <span>가져오기</span>
           </button>
 
           <button
@@ -255,18 +330,168 @@ export const Header: React.FC<HeaderProps> = ({
               <span>앱 설치</span>
             </button>
           )}
-
-          <button
-            type="button"
-            onClick={() => scrollToSection('about')}
-            className="rounded-full px-3 py-1.5 text-xs font-semibold text-stone-600 transition hover:bg-orange-100 hover:text-orange-800"
-          >
-            이용안내
-          </button>
         </nav>
 
         {/* Right Action Tools */}
         <div className="flex items-center gap-1.5 sm:gap-2">
+          {/* Sync Status Badge (Desktop) */}
+          {user && (
+            <div className="hidden xl:flex items-center">
+              {syncStatus === 'synced' && (
+                <span
+                  className="flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-bold text-emerald-700 border border-emerald-200"
+                  title="Cloud Firestore 실시간 동기화 완료"
+                >
+                  <CloudCheck className="h-3.5 w-3.5 text-emerald-600" />
+                  <span>☁️ 동기화됨</span>
+                </span>
+              )}
+              {syncStatus === 'syncing' && (
+                <span
+                  className="flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-bold text-amber-700 border border-amber-200 animate-pulse"
+                  title="Firestore 동기화 중"
+                >
+                  <RefreshCw className="h-3.5 w-3.5 text-amber-600 animate-spin" />
+                  <span>↻ 동기화 중</span>
+                </span>
+              )}
+              {syncStatus === 'offline' && (
+                <span
+                  className="flex items-center gap-1 rounded-full bg-stone-100 px-2.5 py-1 text-[11px] font-bold text-stone-600 border border-stone-200"
+                  title="오프라인 영속 캐시 사용 중"
+                >
+                  <WifiOff className="h-3.5 w-3.5 text-stone-500" />
+                  <span>📴 오프라인</span>
+                </span>
+              )}
+              {syncStatus === 'error' && (
+                <span
+                  className="flex items-center gap-1 rounded-full bg-rose-50 px-2.5 py-1 text-[11px] font-bold text-rose-700 border border-rose-200"
+                  title="클라우드 동기화 오류 발생"
+                >
+                  <AlertCircle className="h-3.5 w-3.5 text-rose-600" />
+                  <span>⚠️ 동기화 오류</span>
+                </span>
+              )}
+            </div>
+          )}
+
+          {/* User Auth Profile / Login Button */}
+          {user ? (
+            <div className="relative" ref={userMenuRef}>
+              <button
+                type="button"
+                onClick={() => setIsUserMenuOpen((prev) => !prev)}
+                className="flex h-10 items-center gap-2 rounded-xl border border-orange-200 bg-white px-2.5 sm:px-3 text-xs font-bold text-stone-700 shadow-sm transition hover:bg-orange-50"
+                title={`${user.displayName || user.email} 계정 관리`}
+                aria-label="사용자 계정 메뉴"
+              >
+                {user.photoURL ? (
+                  <img
+                    src={user.photoURL}
+                    alt={user.displayName || '사용자'}
+                    className="h-6 w-6 rounded-full object-cover border border-orange-200"
+                    referrerPolicy="no-referrer"
+                  />
+                ) : (
+                  <div className="grid h-6 w-6 place-items-center rounded-full bg-gradient-to-tr from-orange-400 to-amber-400 text-[11px] font-black text-white">
+                    {(user.displayName || user.email || 'U')[0].toUpperCase()}
+                  </div>
+                )}
+                <span className="hidden md:inline max-w-[90px] truncate text-stone-800">
+                  {user.displayName || '내 계정'}
+                </span>
+              </button>
+
+              {/* User Dropdown Menu */}
+              {isUserMenuOpen && (
+                <div className="absolute right-0 top-12 z-50 w-64 rounded-2xl border border-stone-200 bg-white p-3 shadow-xl animate-scale-up">
+                  <div className="flex items-center gap-2.5 border-b border-stone-100 pb-3">
+                    {user.photoURL ? (
+                      <img
+                        src={user.photoURL}
+                        alt=""
+                        className="h-10 w-10 rounded-full border border-orange-200"
+                        referrerPolicy="no-referrer"
+                      />
+                    ) : (
+                      <div className="grid h-10 w-10 place-items-center rounded-full bg-orange-100 text-orange-700 font-bold text-sm">
+                        {(user.displayName || user.email || 'U')[0].toUpperCase()}
+                      </div>
+                    )}
+                    <div className="overflow-hidden">
+                      <div className="font-bold text-stone-900 text-xs truncate">
+                        {user.displayName || 'Google 사용자'}
+                      </div>
+                      <div className="text-[11px] text-stone-500 truncate">{user.email}</div>
+                    </div>
+                  </div>
+
+                  <div className="py-2 space-y-1">
+                    <div className="flex items-center justify-between px-2 py-1 text-[11px] text-stone-600 rounded-lg bg-stone-50">
+                      <span>동기화 상태:</span>
+                      <span className="font-bold">
+                        {syncStatus === 'synced'
+                          ? '☁️ 동기화됨'
+                          : syncStatus === 'syncing'
+                          ? '↻ 동기화 중'
+                          : syncStatus === 'offline'
+                          ? '📴 오프라인'
+                          : syncStatus === 'error'
+                          ? '⚠️ 동기화 오류'
+                          : '💻 로컬 모드'}
+                      </span>
+                    </div>
+
+                    {onOpenCloudSyncModal && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsUserMenuOpen(false);
+                          onOpenCloudSyncModal();
+                        }}
+                        className="w-full flex items-center gap-2 rounded-xl px-2.5 py-2 text-xs font-semibold text-stone-700 hover:bg-orange-50 hover:text-orange-900 transition text-left"
+                      >
+                        <Cloud className="h-4 w-4 text-orange-500" />
+                        <span>클라우드 동기화 관리</span>
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="border-t border-stone-100 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsUserMenuOpen(false);
+                        if (onLogout) onLogout();
+                      }}
+                      className="w-full flex items-center gap-2 rounded-xl px-2.5 py-2 text-xs font-bold text-rose-600 hover:bg-rose-50 transition"
+                    >
+                      <LogOut className="h-4 w-4 text-rose-500" />
+                      <span>로그아웃</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={onLogin}
+              className="flex h-10 items-center gap-1.5 rounded-xl border border-stone-200 bg-white px-2.5 sm:px-3 text-xs font-bold text-stone-700 shadow-sm transition hover:bg-stone-50 hover:border-orange-200"
+              title="Google 계정으로 로그인하여 기기간 레시피 동기화"
+            >
+              <svg className="h-4 w-4" viewBox="0 0 24 24">
+                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
+              </svg>
+              <span className="hidden sm:inline">Google로 로그인</span>
+              <span className="sm:hidden">로그인</span>
+            </button>
+          )}
+
           {/* Kitchen Timer Toggle Button */}
           <button
             type="button"
@@ -300,123 +525,215 @@ export const Header: React.FC<HeaderProps> = ({
             <ShoppingCart className="h-4 w-4 text-orange-600" />
             <span className="hidden sm:inline">장보기</span>
             {shoppingCount > 0 && (
-              <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-orange-600 px-1 text-[11px] font-black text-white">
+              <span className="rounded-full bg-orange-500 px-1.5 py-0.5 text-[10px] font-black text-white">
                 {shoppingCount}
               </span>
             )}
           </button>
 
-          {/* Add Recipe Button */}
+          {/* Add Recipe Primary Button */}
           <button
             type="button"
             onClick={() => {
-              logger.info('Header', '새 레시피 추가 클릭');
+              logger.info('Header', '레시피 등록 모달 열기 클릭');
               onOpenAddRecipe();
             }}
-            className="flex h-10 items-center gap-1.5 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 px-3.5 text-xs font-bold text-white shadow-sm transition hover:from-orange-600 hover:to-amber-600 hover:shadow-md"
-            title="새 레시피 등록"
+            className="flex h-10 items-center gap-1.5 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 px-3.5 sm:px-4 text-xs font-black text-white shadow-md shadow-orange-500/20 transition hover:from-orange-600 hover:to-amber-600 active:scale-95"
+            title="새 레시피 직접 등록"
           >
             <PlusCircle className="h-4 w-4" />
-            <span className="hidden sm:inline">레시피 추가</span>
+            <span>레시피 추가</span>
           </button>
 
-          {/* Mobile Menu Button */}
+          {/* Mobile Menu Toggle Button */}
           <button
             type="button"
             onClick={handleToggleMobileMenu}
-            className="grid h-10 w-10 place-items-center rounded-xl border border-orange-200 bg-white text-stone-700 shadow-sm transition hover:bg-orange-50 md:hidden"
-            aria-label="모바일 메뉴 열기"
-            aria-expanded={isMobileMenuOpen}
+            className="flex h-10 w-10 items-center justify-center rounded-xl border border-orange-200 bg-white text-stone-700 md:hidden"
+            aria-label="메뉴 열기/닫기"
           >
             {isMobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
           </button>
         </div>
       </div>
 
-      {/* Mobile Drawer Menu */}
+      {/* Mobile Dropdown Menu */}
       {isMobileMenuOpen && (
-        <div className="border-t border-orange-100 bg-[#fffaf3] px-4 py-3 shadow-lg md:hidden">
-          <div className="mx-auto grid max-w-7xl grid-cols-2 gap-2">
-            {/* ✨ AI 요리사 정식 메뉴 (Mobile) - 눈에 잘 띄도록 상단 전폭 배치 */}
+        <div className="border-t border-orange-100 bg-white/98 p-4 shadow-xl md:hidden animate-fade-in space-y-3">
+          {/* Mobile Auth Banner */}
+          {user ? (
+            <div className="flex items-center justify-between rounded-2xl bg-orange-50/80 p-3 border border-orange-100">
+              <div className="flex items-center gap-2.5 overflow-hidden">
+                {user.photoURL ? (
+                  <img
+                    src={user.photoURL}
+                    alt=""
+                    className="h-9 w-9 rounded-full border border-orange-200 shrink-0"
+                    referrerPolicy="no-referrer"
+                  />
+                ) : (
+                  <div className="grid h-9 w-9 place-items-center rounded-full bg-orange-200 text-orange-800 font-black text-xs shrink-0">
+                    {(user.displayName || user.email || 'U')[0].toUpperCase()}
+                  </div>
+                )}
+                <div className="min-w-0">
+                  <div className="font-bold text-xs text-stone-900 truncate">
+                    {user.displayName || 'Google 사용자'}
+                  </div>
+                  <div className="text-[10px] text-stone-500 flex items-center gap-1">
+                    <span>
+                      {syncStatus === 'synced'
+                        ? '☁️ 동기화됨'
+                        : syncStatus === 'syncing'
+                        ? '↻ 동기화 중'
+                        : syncStatus === 'offline'
+                        ? '📴 오프라인'
+                        : syncStatus === 'error'
+                        ? '⚠️ 동기화 오류'
+                        : '💻 로컬 모드'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsMobileMenuOpen(false);
+                  if (onLogout) onLogout();
+                }}
+                className="rounded-xl bg-white px-2.5 py-1.5 text-xs font-bold text-rose-600 border border-stone-200 shadow-2xs hover:bg-rose-50"
+              >
+                로그아웃
+              </button>
+            </div>
+          ) : (
+            <div className="rounded-2xl bg-stone-50 p-3 border border-stone-200/80 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-stone-700">클라우드 동기화</span>
+                <span className="text-[10px] text-stone-500">PC·모바일 레시피 공유</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsMobileMenuOpen(false);
+                  if (onLogin) onLogin();
+                }}
+                className="w-full flex items-center justify-center gap-2 rounded-xl bg-white border border-stone-300 py-2 text-xs font-bold text-stone-800 shadow-2xs hover:bg-stone-50"
+              >
+                <svg className="h-4 w-4" viewBox="0 0 24 24">
+                  <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                  <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                  <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+                  <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
+                </svg>
+                <span>Google로 로그인</span>
+              </button>
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 gap-2 pb-2 border-b border-stone-100">
             <button
               type="button"
-              onClick={handleGoToAiChef}
-              className="col-span-2 flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 px-4 py-3 text-center text-sm font-black text-white shadow-xs transition hover:from-orange-600 hover:to-amber-600 active:scale-98"
+              onClick={() => {
+                onOpenTodayMenu();
+                setIsMobileMenuOpen(false);
+              }}
+              className="flex items-center gap-2 rounded-xl bg-orange-50 p-2.5 text-xs font-black text-orange-800"
             >
-              <Sparkles className="h-4 w-4 text-amber-200" />
-              <span>✨ AI 요리사 (Q&A)</span>
+              <Dice5 className="h-4 w-4 text-orange-500" />
+              <span>🎲 오늘 뭐 먹지?</span>
             </button>
 
             <button
               type="button"
               onClick={() => {
+                if (onNavigateView) onNavigateView('meal-plan');
+                setIsMobileMenuOpen(false);
+              }}
+              className="flex items-center gap-2 rounded-xl bg-amber-50 p-2.5 text-xs font-black text-amber-800"
+            >
+              <Calendar className="h-4 w-4 text-amber-500" />
+              <span>📅 주간 식단표</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                if (onNavigateView) onNavigateView('ai-chef');
+                setIsMobileMenuOpen(false);
+              }}
+              className="flex items-center gap-2 rounded-xl bg-orange-100/70 p-2.5 text-xs font-black text-orange-900"
+            >
+              <Sparkles className="h-4 w-4 text-orange-600" />
+              <span>✨ AI 요리사</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                onOpenFamilyShare();
+                setIsMobileMenuOpen(false);
+              }}
+              className="flex items-center gap-2 rounded-xl bg-rose-50 p-2.5 text-xs font-black text-rose-800"
+            >
+              <Users className="h-4 w-4 text-rose-500" />
+              <span>👨‍👩‍👧 가족 공간</span>
+            </button>
+          </div>
+
+          <div className="flex flex-col gap-1 pt-1">
+            <button
+              type="button"
+              onClick={() => {
+                if (onNavigateView) onNavigateView('home');
                 scrollToSection('home');
               }}
-              className="flex items-center justify-center gap-1.5 rounded-xl bg-orange-50 px-4 py-3 text-center text-sm font-bold text-stone-700 transition hover:bg-orange-100"
+              className="flex items-center gap-2 rounded-xl p-2.5 text-xs font-bold text-stone-700 hover:bg-stone-50"
             >
-              <Home className="h-4 w-4 text-orange-600" />
+              <Home className="h-4 w-4 text-orange-500" />
               <span>홈으로</span>
             </button>
+
             <button
               type="button"
               onClick={() => handleNavClick('전체')}
-              className="flex items-center justify-center gap-1.5 rounded-xl bg-orange-50 px-4 py-3 text-center text-sm font-bold text-stone-700 transition hover:bg-orange-100"
+              className="flex items-center gap-2 rounded-xl p-2.5 text-xs font-bold text-stone-700 hover:bg-stone-50"
             >
-              <BookOpen className="h-4 w-4 text-orange-600" />
-              <span>전체 레시피</span>
+              <BookOpen className="h-4 w-4 text-stone-500" />
+              <span>전체 레시피 둘러보기</span>
             </button>
+
             <button
               type="button"
               onClick={() => handleNavClick('즐겨찾기')}
-              className="flex items-center justify-center gap-1.5 rounded-xl bg-amber-50 px-4 py-3 text-center text-sm font-bold text-amber-800 transition hover:bg-amber-100"
+              className="flex items-center gap-2 rounded-xl p-2.5 text-xs font-bold text-stone-700 hover:bg-stone-50"
             >
-              <Bookmark className="h-4 w-4 fill-amber-500 text-amber-500" />
+              <Bookmark className="h-4 w-4 text-amber-500" />
               <span>즐겨찾기 ({bookmarkCount})</span>
             </button>
+
             <button
               type="button"
               onClick={() => {
                 onOpenImportRecipe();
                 setIsMobileMenuOpen(false);
               }}
-              className="flex items-center justify-center gap-1.5 rounded-xl bg-orange-100/80 px-4 py-3 text-center text-sm font-bold text-orange-800 transition hover:bg-orange-200"
+              className="flex items-center gap-2 rounded-xl p-2.5 text-xs font-bold text-stone-700 hover:bg-stone-50"
             >
-              <Sparkles className="h-4 w-4 text-orange-600" />
-              <span>레시피 가져오기</span>
+              <Camera className="h-4 w-4 text-orange-500" />
+              <span>레시피 가져오기 / 사진 인식</span>
             </button>
+
             <button
               type="button"
               onClick={() => {
                 onOpenBackupRestore();
                 setIsMobileMenuOpen(false);
               }}
-              className="flex items-center justify-center gap-1.5 rounded-xl bg-orange-50 px-4 py-3 text-center text-sm font-bold text-stone-700 transition hover:bg-orange-100"
+              className="flex items-center gap-2 rounded-xl p-2.5 text-xs font-bold text-stone-700 hover:bg-stone-50"
             >
-              <Database className="h-4 w-4 text-orange-600" />
-              <span>백업/복원</span>
-            </button>
-
-            {canInstallPwa && onInstallPwa && (
-              <button
-                type="button"
-                onClick={() => {
-                  onInstallPwa();
-                  setIsMobileMenuOpen(false);
-                }}
-                className="flex items-center justify-center gap-1.5 rounded-xl bg-stone-100 px-4 py-3 text-center text-sm font-bold text-stone-700 transition hover:bg-orange-100"
-              >
-                <Download className="h-4 w-4 text-orange-600" />
-                <span>앱 설치하기</span>
-              </button>
-            )}
-
-            <button
-              type="button"
-              onClick={() => scrollToSection('about')}
-              className="col-span-2 flex items-center justify-center gap-1.5 rounded-xl bg-orange-50 px-4 py-2.5 text-center text-sm font-bold text-stone-700 transition hover:bg-orange-100"
-            >
-              <HelpCircle className="h-4 w-4 text-stone-500" />
-              <span>이용안내</span>
+              <Database className="h-4 w-4 text-stone-500" />
+              <span>데이터 백업 및 복원</span>
             </button>
           </div>
         </div>

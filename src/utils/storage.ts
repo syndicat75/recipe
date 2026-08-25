@@ -354,3 +354,191 @@ export function restoreBackupData(
     recentIds: finalRecent,
   };
 }
+
+/**
+ * 주간 식단표 데이터를 로컬스토리지에서 로드합니다.
+ * @returns 날짜별 식단 항목 맵 (키: YYYY-MM-DD)
+ */
+export function loadWeeklyMealPlan(): Record<string, import('../types/recipe').MealPlanEntry[]> {
+  logger.debug('storage.loadWeeklyMealPlan', '주간 식단표 로드 시도');
+  try {
+    const raw = localStorage.getItem(APP_CONFIG.storageKeys.weeklyMealPlan);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return typeof parsed === 'object' && parsed !== null ? parsed : {};
+  } catch (error) {
+    logger.error('storage.loadWeeklyMealPlan', '식단표 파싱 실패', error);
+    return {};
+  }
+}
+
+/**
+ * 주간 식단표 데이터를 로컬스토리지에 저장합니다.
+ * @param plan 저장할 날짜별 식단 데이터 맵
+ */
+export function saveWeeklyMealPlan(plan: Record<string, import('../types/recipe').MealPlanEntry[]>): void {
+  logger.info('storage.saveWeeklyMealPlan', `주간 식단표 저장 (등록 날짜 수: ${Object.keys(plan).length})`);
+  try {
+    localStorage.setItem(APP_CONFIG.storageKeys.weeklyMealPlan, JSON.stringify(plan));
+  } catch (error) {
+    logger.error('storage.saveWeeklyMealPlan', '식단표 저장 실패', error);
+  }
+}
+
+/**
+ * 오늘 뭐 먹지 최근 추천 레시피 ID 목록을 조회합니다. (중복 최소화용 최대 5개)
+ * @returns 최근 추천 레시피 ID 배열
+ */
+export function getRecentRecommendations(): number[] {
+  logger.debug('storage.getRecentRecommendations', '최근 추천 목록 로드');
+  try {
+    const raw = localStorage.getItem(APP_CONFIG.storageKeys.recentRecommendations);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    logger.error('storage.getRecentRecommendations', '최근 추천 목록 파싱 실패', error);
+    return [];
+  }
+}
+
+/**
+ * 오늘 뭐 먹지 최근 추천 레시피 ID 목록을 저장합니다. (최대 5개 유지)
+ * @param ids 저장할 추천 ID 배열
+ */
+export function saveRecentRecommendations(ids: number[]): void {
+  logger.info('storage.saveRecentRecommendations', `최근 추천 목록 저장 (${ids.length}개)`);
+  try {
+    const sliced = ids.slice(-5);
+    localStorage.setItem(APP_CONFIG.storageKeys.recentRecommendations, JSON.stringify(sliced));
+  } catch (error) {
+    logger.error('storage.saveRecentRecommendations', '최근 추천 목록 저장 실패', error);
+  }
+}
+
+/**
+ * 특정 레시피의 저장된 요리 진행 상황을 조회합니다.
+ * @param recipeId 레시피 ID
+ * @returns 요리 진행 상태 또는 null
+ */
+export function loadCookingProgress(recipeId: number): import('../types/recipe').CookingProgressState | null {
+  logger.debug('storage.loadCookingProgress', `요리 진행상태 로드: 레시피 ID ${recipeId}`);
+  try {
+    const raw = localStorage.getItem(APP_CONFIG.storageKeys.cookingProgress);
+    if (!raw) return null;
+    const map = JSON.parse(raw);
+    if (map && typeof map === 'object' && map[recipeId]) {
+      return map[recipeId];
+    }
+    return null;
+  } catch (error) {
+    logger.error('storage.loadCookingProgress', '진행상태 로드 실패', error);
+    return null;
+  }
+}
+
+/**
+ * 특정 레시피의 요리 진행 상황을 저장합니다.
+ * @param state 저장할 요리 진행 상태
+ */
+export function saveCookingProgress(state: import('../types/recipe').CookingProgressState): void {
+  logger.info('storage.saveCookingProgress', `요리 진행상태 저장: 레시피 ID ${state.recipeId}, 단계 ${state.currentStepIndex}`);
+  try {
+    const raw = localStorage.getItem(APP_CONFIG.storageKeys.cookingProgress);
+    const map = raw ? JSON.parse(raw) : {};
+    map[state.recipeId] = state;
+    localStorage.setItem(APP_CONFIG.storageKeys.cookingProgress, JSON.stringify(map));
+  } catch (error) {
+    logger.error('storage.saveCookingProgress', '진행상태 저장 실패', error);
+  }
+}
+
+/**
+ * 특정 레시피의 요리 진행 상황을 초기화합니다.
+ * @param recipeId 레시피 ID
+ */
+export function clearCookingProgress(recipeId: number): void {
+  logger.info('storage.clearCookingProgress', `요리 진행상태 초기화: 레시피 ID ${recipeId}`);
+  try {
+    const raw = localStorage.getItem(APP_CONFIG.storageKeys.cookingProgress);
+    if (!raw) return;
+    const map = JSON.parse(raw);
+    delete map[recipeId];
+    localStorage.setItem(APP_CONFIG.storageKeys.cookingProgress, JSON.stringify(map));
+  } catch (error) {
+    logger.error('storage.clearCookingProgress', '진행상태 초기화 실패', error);
+  }
+}
+
+/**
+ * 사용자 가족 프로필을 로컬스토리지에서 조회합니다.
+ * 없으면 임의의 로컬 고유 ID를 생성하여 반환합니다.
+ * @returns 가족 사용자 프로필
+ */
+export function loadFamilyProfile(): import('../types/recipe').FamilyUserProfile {
+  logger.debug('storage.loadFamilyProfile', '가족 사용자 프로필 로드');
+  try {
+    const raw = localStorage.getItem(APP_CONFIG.storageKeys.familyProfile);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && parsed.id) return parsed;
+    }
+  } catch (error) {
+    logger.error('storage.loadFamilyProfile', '프로필 파싱 실패', error);
+  }
+  const defaultProfile: import('../types/recipe').FamilyUserProfile = {
+    id: `user_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+    name: '나의 요리사',
+    currentFamilyId: null,
+    avatar: '👨‍🍳',
+  };
+  try {
+    localStorage.setItem(APP_CONFIG.storageKeys.familyProfile, JSON.stringify(defaultProfile));
+  } catch {
+    // 무시
+  }
+  return defaultProfile;
+}
+
+/**
+ * 사용자 가족 프로필을 저장합니다.
+ * @param profile 저장할 프로필
+ */
+export function saveFamilyProfile(profile: import('../types/recipe').FamilyUserProfile): void {
+  logger.info('storage.saveFamilyProfile', `가족 프로필 저장: ${profile.name} (가족 ID: ${profile.currentFamilyId})`);
+  try {
+    localStorage.setItem(APP_CONFIG.storageKeys.familyProfile, JSON.stringify(profile));
+  } catch (error) {
+    logger.error('storage.saveFamilyProfile', '프로필 저장 실패', error);
+  }
+}
+
+/**
+ * 로컬에 캐시된 가족 공간 목록을 조회합니다.
+ * @returns 가족 공간 배열
+ */
+export function loadFamilySpaces(): import('../types/recipe').FamilySpace[] {
+  logger.debug('storage.loadFamilySpaces', '가족 공간 목록 로드');
+  try {
+    const raw = localStorage.getItem(APP_CONFIG.storageKeys.familySpaces);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    logger.error('storage.loadFamilySpaces', '가족 공간 파싱 실패', error);
+    return [];
+  }
+}
+
+/**
+ * 가족 공간 목록을 로컬에 저장합니다.
+ * @param spaces 가족 공간 배열
+ */
+export function saveFamilySpaces(spaces: import('../types/recipe').FamilySpace[]): void {
+  logger.info('storage.saveFamilySpaces', `가족 공간 저장 (${spaces.length}개)`);
+  try {
+    localStorage.setItem(APP_CONFIG.storageKeys.familySpaces, JSON.stringify(spaces));
+  } catch (error) {
+    logger.error('storage.saveFamilySpaces', '가족 공간 저장 실패', error);
+  }
+}
