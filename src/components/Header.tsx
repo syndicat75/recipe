@@ -28,6 +28,10 @@ interface HeaderProps {
   currentCategory: FilterCategory;
   /** 카테고리 선택 핸들러 */
   onSelectCategory: (category: FilterCategory) => void;
+  /** 현재 활성 뷰 (홈/레시피 vs AI 요리사) */
+  currentView?: 'home' | 'ai-chef';
+  /** 뷰 전환 핸들러 */
+  onNavigateView?: (view: 'home' | 'ai-chef') => void;
   /** 즐겨찾기 레시피 개수 */
   bookmarkCount: number;
   /** 장보기 목록 아이템 개수 */
@@ -58,6 +62,8 @@ interface HeaderProps {
 export const Header: React.FC<HeaderProps> = ({
   currentCategory,
   onSelectCategory,
+  currentView = 'home',
+  onNavigateView,
   bookmarkCount,
   shoppingCount,
   onOpenShoppingList,
@@ -86,7 +92,17 @@ export const Header: React.FC<HeaderProps> = ({
    */
   const handleNavClick = (targetCategory: FilterCategory): void => {
     logger.info('Header.handleNavClick', `네비게이션 클릭: ${targetCategory}`);
+    if (onNavigateView) onNavigateView('home');
     onSelectCategory(targetCategory);
+    setIsMobileMenuOpen(false);
+  };
+
+  /**
+   * AI 요리사 화면으로 이동
+   */
+  const handleGoToAiChef = (): void => {
+    logger.info('Header.handleGoToAiChef', 'AI 요리사 메뉴 클릭');
+    if (onNavigateView) onNavigateView('ai-chef');
     setIsMobileMenuOpen(false);
   };
 
@@ -96,10 +112,13 @@ export const Header: React.FC<HeaderProps> = ({
    */
   const scrollToSection = (id: string): void => {
     logger.info('Header.scrollToSection', `스크롤 이동: #${id}`);
-    const el = document.getElementById(id);
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth' });
-    }
+    if (onNavigateView) onNavigateView('home');
+    setTimeout(() => {
+      const el = document.getElementById(id);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth' });
+      }
+    }, 50);
     setIsMobileMenuOpen(false);
   };
 
@@ -142,19 +161,24 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             type="button"
             onClick={() => scrollToSection('home')}
-            className="rounded-full px-3 py-1.5 text-xs font-semibold text-stone-600 transition hover:bg-orange-100 hover:text-orange-800"
+            className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${
+              currentView === 'home' && currentCategory === '전체'
+                ? 'bg-orange-100/80 text-orange-900 font-bold'
+                : 'text-stone-600 hover:bg-orange-100 hover:text-orange-800'
+            }`}
           >
             홈
           </button>
           <button
             type="button"
             onClick={() => {
+              if (onNavigateView) onNavigateView('home');
               onSelectCategory('전체');
               scrollToSection('recipes');
             }}
             className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${
-              currentCategory === '전체'
-                ? 'bg-orange-100 font-bold text-orange-800'
+              currentView === 'home' && currentCategory === '전체'
+                ? 'text-stone-700 hover:bg-orange-100'
                 : 'text-stone-600 hover:bg-orange-100 hover:text-orange-800'
             }`}
           >
@@ -163,11 +187,12 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             type="button"
             onClick={() => {
+              if (onNavigateView) onNavigateView('home');
               onSelectCategory('즐겨찾기');
               scrollToSection('recipes');
             }}
             className={`flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-semibold transition ${
-              currentCategory === '즐겨찾기'
+              currentView === 'home' && currentCategory === '즐겨찾기'
                 ? 'bg-amber-100 font-bold text-amber-800'
                 : 'text-stone-600 hover:bg-orange-100 hover:text-orange-800'
             }`}
@@ -181,6 +206,21 @@ export const Header: React.FC<HeaderProps> = ({
             )}
           </button>
 
+          {/* ✨ AI 요리사 정식 메뉴 버튼 (PC) */}
+          <button
+            type="button"
+            onClick={handleGoToAiChef}
+            className={`flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-bold transition shadow-2xs ${
+              currentView === 'ai-chef'
+                ? 'bg-gradient-to-r from-orange-500 to-amber-500 text-white shadow-xs'
+                : 'bg-orange-50/90 text-orange-800 hover:bg-orange-100 hover:text-orange-900 border border-orange-200/60'
+            }`}
+            title="요리 고민이나 팁을 무엇이든 물어보는 AI 요리사"
+          >
+            <Sparkles className={`h-3.5 w-3.5 ${currentView === 'ai-chef' ? 'text-amber-200' : 'text-orange-600'}`} />
+            <span>✨ AI 요리사</span>
+          </button>
+
           {/* External Recipe Import Button */}
           <button
             type="button"
@@ -188,10 +228,9 @@ export const Header: React.FC<HeaderProps> = ({
               logger.info('Header', '외부 레시피 가져오기 클릭');
               onOpenImportRecipe();
             }}
-            className="flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-bold text-orange-700 bg-orange-50 transition hover:bg-orange-100"
+            className="flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-semibold text-stone-600 transition hover:bg-orange-100 hover:text-orange-800"
             title="웹페이지 URL이나 텍스트에서 AI로 레시피 가져오기"
           >
-            <Sparkles className="h-3.5 w-3.5 text-orange-500" />
             <span>레시피 가져오기</span>
           </button>
 
@@ -298,6 +337,16 @@ export const Header: React.FC<HeaderProps> = ({
       {isMobileMenuOpen && (
         <div className="border-t border-orange-100 bg-[#fffaf3] px-4 py-3 shadow-lg md:hidden">
           <div className="mx-auto grid max-w-7xl grid-cols-2 gap-2">
+            {/* ✨ AI 요리사 정식 메뉴 (Mobile) - 눈에 잘 띄도록 상단 전폭 배치 */}
+            <button
+              type="button"
+              onClick={handleGoToAiChef}
+              className="col-span-2 flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 px-4 py-3 text-center text-sm font-black text-white shadow-xs transition hover:from-orange-600 hover:to-amber-600 active:scale-98"
+            >
+              <Sparkles className="h-4 w-4 text-amber-200" />
+              <span>✨ AI 요리사 (Q&A)</span>
+            </button>
+
             <button
               type="button"
               onClick={() => {

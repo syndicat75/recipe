@@ -227,6 +227,22 @@ export const RecipeDetailModal: React.FC<RecipeDetailModalProps> = ({
 
           {/* Header Action Tools */}
           <div className="flex items-center gap-1.5 sm:gap-2">
+            {/* ✨ AI에게 물어보기 Button */}
+            {onOpenAiModal && (
+              <button
+                type="button"
+                onClick={() => {
+                  logger.info('RecipeDetailModal', `AI에게 물어보기 클릭: ${recipe.name}`);
+                  onOpenAiModal(recipe);
+                }}
+                className="flex h-9 items-center gap-1 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 px-2.5 sm:px-3 text-xs font-bold text-white shadow-xs transition hover:from-orange-600 hover:to-amber-600 active:scale-95"
+                title="이 레시피에 대해 AI 요리사에게 질문하기"
+              >
+                <Sparkles className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">✨ AI 질문</span>
+              </button>
+            )}
+
             {/* Edit Button */}
             <button
               type="button"
@@ -516,8 +532,35 @@ export const RecipeDetailModal: React.FC<RecipeDetailModalProps> = ({
             )}
           </div>
 
+          {/* AI Chef In-Modal Action Banner (Requirement 4) */}
+          {onOpenAiModal && (
+            <div className="mt-8 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-orange-200/90 bg-gradient-to-r from-[#fffaf3] to-orange-50/80 p-4 shadow-2xs">
+              <div className="flex items-center gap-2.5">
+                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-gradient-to-tr from-orange-500 to-amber-500 text-base text-white shadow-xs">
+                  ✨
+                </span>
+                <div>
+                  <div className="text-xs font-black text-stone-900">
+                    '{recipe.name}' 요리 중 궁금한 점이 있나요?
+                  </div>
+                  <div className="text-[11px] text-stone-500">
+                    대체 재료, 불 조절, 감칠맛 팁을 AI 요리사에게 바로 물어보세요.
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => onOpenAiModal(recipe)}
+                className="flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 px-3.5 py-2 text-xs font-bold text-white shadow-xs transition hover:from-orange-600 hover:to-amber-600 active:scale-95"
+              >
+                <Sparkles className="h-3.5 w-3.5" />
+                <span>✨ AI에게 물어보기</span>
+              </button>
+            </div>
+          )}
+
           {/* Section: Personal Recipe Notes */}
-          <div className="mt-8 rounded-2xl border border-amber-200 bg-amber-50/40 p-4">
+          <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50/40 p-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1.5 font-soft text-xs font-bold text-amber-900">
                 <StickyNote className="h-4 w-4 text-amber-600" />

@@ -28,6 +28,23 @@ export const APP_CONFIG = {
     model: 'gemini-3.7-flash',
     importEndpoint: '/api/ai/import-recipe',
     askEndpoint: '/api/ai/ask-recipe',
+    quickQuestions: [
+      { id: 'substitute', label: '🥬 대체 재료', prompt: '대체할 수 있는 다른 재료나 양념이 있나요?' },
+      { id: 'tastier', label: '👨‍🍳 더 맛있게', prompt: '더 맛있고 감칠맛 나게 만드는 셰프의 특급 비법 꿀팁을 알려주세요.' },
+      { id: 'less_spicy', label: '🌶️ 덜 맵게', prompt: '너무 맵지 않고 부드럽게 먹을 수 있는 조절 팁을 알려주세요.' },
+      { id: 'too_salty', label: '🧂 너무 짤 때', prompt: '음식이 너무 짜졌는데 원래 맛을 해치지 않고 살리는 응급 복구법을 알려주세요.' },
+      { id: 'quick_cook', label: '⏱️ 빠르게 만들기', prompt: '조리 시간을 단축하거나 더 간편하게 만드는 요령을 알려주세요.' },
+      { id: 'leftover', label: '🍱 남은 재료 활용', prompt: '남은 재료나 남은 요리를 활용할 수 있는 아이디어나 보관법을 알려주세요.' },
+    ],
+    exampleQuestions: [
+      '대체 재료는?',
+      '더 맛있게 만드는 방법은?',
+      '너무 짜졌는데 어떻게 하지?',
+      '너무 매운데 어떻게 살리지?',
+      '남은 재료로 뭘 만들까?',
+      '2인분을 4인분으로 바꾸려면?',
+      '돼지고기 대신 소고기를 사용해도 될까?',
+    ],
     presetQuestions: [
       { id: 'substitute', label: '🔄 대체 재료 추천', prompt: '이 레시피에서 다른 재료로 대체할 수 있는 것들이 있나요? 알레르기나 냉장고 파먹기용 대체법을 알려주세요.' },
       { id: 'secret_tip', label: '🍯 셰프의 특급 비법', prompt: '이 요리를 식당처럼 훨씬 맛있고 감칠맛 나게 만드는 셰프의 한 끗 비법 팁을 알려주세요.' },

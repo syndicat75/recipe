@@ -149,41 +149,49 @@ ${sourceContent}
   });
 
   /**
-   * AI 레시피 질문 및 맞춤형 답변 엔드포인트
-   * 현재 레시피 정보와 사용자 질문을 기반으로 요리 팁, 재료 대체, 불조절 등을 답변
+   * AI 레시피 및 일반 요리 질의응답 엔드포인트
+   * 특정 레시피 맥락(있을 경우) 또는 일반 요리 질문을 기반으로 Gemini 3.7 Flash 모델이 맞춤형 셰프 조언을 제공
    */
   app.post('/api/ai/ask-recipe', async (req: Request, res: Response): Promise<void> => {
     try {
       const { recipe, question, chatHistory } = req.body as {
-        recipe: {
+        recipe?: {
           name: string;
-          category: string;
-          ingredients: string;
-          method: string;
+          category?: string;
+          ingredients?: string;
+          method?: string;
           userNotes?: string;
           cookingTimeMinutes?: number;
           difficulty?: string;
-        };
+        } | null;
         question: string;
         chatHistory?: Array<{ role: 'user' | 'model'; text: string }>;
       };
 
-      if (!recipe || !question) {
-        res.status(400).json({ error: '레시피 정보와 질문을 입력해주세요.' });
+      if (!question || !question.trim()) {
+        res.status(400).json({ success: false, error: '질문 내용을 입력해주세요.' });
         return;
       }
 
-      const recipeContext = `[현재 레시피 정보]
-- 요리명: ${recipe.name}
-- 카테고리: ${recipe.category}
-- 예상시간: ${recipe.cookingTimeMinutes || 15}분 / 난이도: ${recipe.difficulty || '쉬움'}
-- 재료:
-${recipe.ingredients}
-- 조리 순서:
-${recipe.method}
-${recipe.userNotes ? `- 사용자 기존 메모: ${recipe.userNotes}` : ''}`;
+      let contextPrompt = '';
 
-      let conversationPrompt = `${recipeContext}\n\n`;
+      if (recipe && recipe.name) {
+        contextPrompt = `[현재 사용자가 보고 있는 레시피 정보]
+- 요리명: ${recipe.name}
+- 카테고리: ${recipe.category || '기타'}
+- 예상시간: ${recipe.cookingTimeMinutes ? `${recipe.cookingTimeMinutes}분` : '정보 없음'} / 난이도: ${recipe.difficulty || '보통'}
+- 재료 목록:
+${recipe.ingredients || '(등록된 재료 없음)'}
+- 조리 순서:
+${recipe.method || '(등록된 조리 순서 없음)'}
+${recipe.userNotes ? `- 사용자의 나만의 메모: ${recipe.userNotes}` : ''}
+
+[사용자의 상황]: 사용자는 위의 '${recipe.name}' 요리를 하거나 준비 중이며, 이 레시피와 관련된 질문을 하고 있습니다.`;
+      } else {
+        contextPrompt = `[모드]: 일반 요리 및 레시피 상담 모드 (특정 레시피가 지정되지 않은 일반 질문)`;
+      }
+
+      let conversationPrompt = `${contextPrompt}\n\n`;
 
       if (chatHistory && chatHistory.length > 0) {
         conversationPrompt += `[이전 대화 내역]\n`;
@@ -193,14 +201,20 @@ ${recipe.userNotes ? `- 사용자 기존 메모: ${recipe.userNotes}` : ''}`;
         conversationPrompt += `\n`;
       }
 
-      conversationPrompt += `[사용자의 새 질문]: ${question}\n\n위 레시피에 맞추어 친절하고 실용적이며 명확하게 한국어로 답변해주세요. 요리 초보자도 쉽게 따라할 수 있도록 계량이나 팁을 구체적으로 설명해주세요.`;
+      conversationPrompt += `[사용자의 새 질문]: ${question.trim()}
+
+[답변 가이드라인]:
+1. 20년 경력의 친절하고 전문적인 홈쿡 마스터 셰프 입장에서 한국어로 명확하고 실용적인 조언을 해주세요.
+2. 대체 재료, 계량 조절, 불 조절, 간 맞추기(짜거나 매울 때 등), 보관법, 요리 추천 등 사용자의 질문에 직접적인 해결책을 제시하세요.
+3. 요리하면서 모바일 화면으로 빠르게 읽기 편하도록 핵심 포인트를 2~4개 문단 또는 글머리 기호로 정리해주세요. 불필요하게 장황한 서론이나 사설은 생략하세요.
+4. 특정 레시피 질문인 경우, 해당 레시피의 재료와 조리법 맥락을 최대한 존중하여 조언해주세요.`;
 
       const response = await ai.models.generateContent({
         model: 'gemini-3.7-flash',
         contents: conversationPrompt,
         config: {
           systemInstruction:
-            '당신은 친절하고 전문적인 20년 경력의 한식 및 홈쿡 마스터 셰프입니다. 사용자가 보고 있는 레시피의 재료, 조리 순서, 상황에 맞추어 가장 실용적이고 정확한 조언을 해줍니다. 불필요하게 장황하지 않으면서도 핵심 꿀팁과 대체 재료, 계량법을 마크다운 형식으로 깔끔하게 설명하세요.',
+            '당신은 대한민국 최고의 친절하고 실용적인 20년 경력의 한식 및 홈쿡 마스터 셰프입니다. 사용자가 질문한 요리 고민(대체 재료, 망친 요리 복구, 간 맞추기, 남은 재료 활용, 맛있는 비법 등)을 즉시 해결할 수 있는 명쾌하고 쉬운 답변을 마크다운 형식으로 제공하세요.',
           temperature: 0.7,
         },
       });
@@ -213,7 +227,7 @@ ${recipe.userNotes ? `- 사용자 기존 메모: ${recipe.userNotes}` : ''}`;
       console.error('Error asking AI about recipe:', error);
       res.status(500).json({
         success: false,
-        error: 'AI 답변 생성 중 문제가 발생했습니다.',
+        error: 'AI 답변 생성 중 문제가 발생했습니다. 잠시 후 다시 시도해주세요.',
         details: error instanceof Error ? error.message : String(error),
       });
     }

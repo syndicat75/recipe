@@ -3,7 +3,7 @@
  * @description 내 입맛 레시피 서비스 워커 (PWA 오프라인 캐싱 및 빠른 로딩 지원)
  */
 
-const CACHE_NAME = 'my-recipe-cache-v1.2';
+const CACHE_NAME = 'my-recipe-cache-v2.0';
 const STATIC_ASSETS = [
   '/',
   '/index.html',

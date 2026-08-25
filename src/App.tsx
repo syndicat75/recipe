@@ -39,6 +39,7 @@ import { TimerWidget } from './components/TimerWidget';
 import { AboutSection } from './components/AboutSection';
 import { Footer } from './components/Footer';
 import { Toast } from './components/Toast';
+import { AiChefView } from './components/AiChefView';
 
 /**
  * 최상위 App 컴포넌트
@@ -51,12 +52,16 @@ export default function App(): React.JSX.Element {
   const [userNotes, setUserNotes] = useState<Record<number, string>>({});
   const [recentRecipeIds, setRecentRecipeIds] = useState<number[]>([]);
 
-  // 2. Filtering, Searching & Sorting State
+  // 2. View & Routing State
+  const [currentView, setCurrentView] = useState<'home' | 'ai-chef'>('home');
+  const [aiChefRecipe, setAiChefRecipe] = useState<Recipe | null>(null);
+
+  // 3. Filtering, Searching & Sorting State
   const [activeCategory, setActiveCategory] = useState<FilterCategory>('전체');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [sortOption, setSortOption] = useState<SortOption>('default');
 
-  // 3. Modals & Widgets State
+  // 4. Modals & Widgets State
   const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(null);
   const [cookingModeRecipe, setCookingModeRecipe] = useState<Recipe | null>(null);
   const [cookingMultiplier, setCookingMultiplier] = useState<number>(1);
@@ -113,6 +118,41 @@ export default function App(): React.JSX.Element {
   const handleDismissToast = useCallback((id: string): void => {
     logger.debug('App.handleDismissToast', `토스트 수동 닫기: ${id}`);
     setToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
+
+  // URL Hash 기반 라우팅 동기화 (/ai-chef, #/ai-chef)
+  useEffect(() => {
+    const handleHashChange = (): void => {
+      const hash = window.location.hash;
+      logger.info('App.handleHashChange', `해시 변경 감지: ${hash}`);
+      if (hash.includes('ai-chef')) {
+        setCurrentView('ai-chef');
+      } else {
+        setCurrentView('home');
+      }
+    };
+
+    // 초기 로드 시 확인
+    if (window.location.hash.includes('ai-chef') || window.location.pathname === '/ai-chef') {
+      setCurrentView('ai-chef');
+    }
+
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
+  }, []);
+
+  /**
+   * 뷰 전환 핸들러
+   * @param view 타겟 뷰
+   */
+  const handleNavigateView = useCallback((view: 'home' | 'ai-chef'): void => {
+    logger.info('App.handleNavigateView', `뷰 전환: ${view}`);
+    setCurrentView(view);
+    if (view === 'ai-chef') {
+      window.location.hash = '#/ai-chef';
+    } else {
+      window.location.hash = '';
+    }
   }, []);
 
   // PWA 설치 프롬프트 및 온/오프라인 이벤트 리스너 등록
@@ -559,6 +599,8 @@ export default function App(): React.JSX.Element {
       <Header
         currentCategory={activeCategory}
         onSelectCategory={setActiveCategory}
+        currentView={currentView}
+        onNavigateView={handleNavigateView}
         bookmarkCount={bookmarkedIds.length}
         shoppingCount={shoppingList.length}
         onOpenShoppingList={() => setIsShoppingModalOpen(true)}
@@ -576,93 +618,135 @@ export default function App(): React.JSX.Element {
       />
 
       <main>
-        {/* Hero Section */}
-        <HeroSection
-          totalRecipeCount={recipes.length}
-          categoryCount={CATEGORY_LIST.length}
-          bookmarkCount={bookmarkedIds.length}
-          onSelectCategory={setActiveCategory}
-          onScrollToRecipes={scrollToRecipes}
-        />
+        {currentView === 'ai-chef' ? (
+          /* ✨ AI 요리사 Q&A 전용 화면 (Route: /ai-chef, #/ai-chef) */
+          <AiChefView
+            activeRecipe={aiChefRecipe}
+            allRecipes={recipes}
+            userNotes={userNotes}
+            onSelectActiveRecipe={setAiChefRecipe}
+            onBackToHome={() => handleNavigateView('home')}
+            onSaveRecipeNote={handleSaveRecipeNote}
+            showToast={showToast}
+            onOpenConfirm={({ title, message, confirmText, onConfirm }) =>
+              setConfirmDialog({
+                isOpen: true,
+                title,
+                message,
+                confirmText: confirmText || '확인',
+                isDestructive: false,
+                onConfirm: () => {
+                  setConfirmDialog((prev) => ({ ...prev, isOpen: false }));
+                  onConfirm();
+                },
+              })
+            }
+            isOffline={isOffline}
+          />
+        ) : (
+          /* 기본 홈 & 레시피 뷰 */
+          <>
+            {/* Hero Section */}
+            <HeroSection
+              totalRecipeCount={recipes.length}
+              categoryCount={CATEGORY_LIST.length}
+              bookmarkCount={bookmarkedIds.length}
+              onSelectCategory={setActiveCategory}
+              onScrollToRecipes={scrollToRecipes}
+            />
 
-        {/* Recently Viewed Recipes Bar */}
-        <RecentRecipes
-          allRecipes={recipes}
-          recentIds={recentRecipeIds}
-          onOpenDetail={handleOpenDetail}
-        />
+            {/* Recently Viewed Recipes Bar */}
+            <RecentRecipes
+              allRecipes={recipes}
+              recentIds={recentRecipeIds}
+              onOpenDetail={handleOpenDetail}
+            />
 
-        {/* Recipe Finder Container */}
-        <div className="mx-auto max-w-7xl px-4 pt-8 sm:px-6 lg:px-8">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-            <div>
-              <p className="text-xs font-black uppercase tracking-[0.2em] text-orange-500">
-                Recipe Finder
-              </p>
-              <h2 className="mt-1 font-soft text-2xl font-black tracking-tight text-stone-900 sm:text-3xl">
-                원하는 레시피를 바로 찾아보세요
-              </h2>
-            </div>
+            {/* Recipe Finder Container */}
+            <div className="mx-auto max-w-7xl px-4 pt-8 sm:px-6 lg:px-8">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+                <div>
+                  <p className="text-xs font-black uppercase tracking-[0.2em] text-orange-500">
+                    Recipe Finder
+                  </p>
+                  <h2 className="mt-1 font-soft text-2xl font-black tracking-tight text-stone-900 sm:text-3xl">
+                    원하는 레시피를 바로 찾아보세요
+                  </h2>
+                </div>
 
-            {/* Search Input */}
-            <div className="w-full lg:max-w-md">
-              <SearchBar
-                searchQuery={searchQuery}
-                onSearchChange={setSearchQuery}
-                onSelectTag={(tag) => {
-                  setSearchQuery(tag);
-                  scrollToRecipes();
-                }}
+                {/* Search Input */}
+                <div className="w-full lg:max-w-md">
+                  <SearchBar
+                    searchQuery={searchQuery}
+                    onSearchChange={setSearchQuery}
+                    onSelectTag={(tag) => {
+                      setSearchQuery(tag);
+                      scrollToRecipes();
+                    }}
+                  />
+                </div>
+              </div>
+
+              {/* Category Filter Tabs */}
+              <CategoryFilter
+                activeCategory={activeCategory}
+                onCategoryChange={setActiveCategory}
+                categoryCounts={categoryCounts}
+                totalCount={recipes.length}
+                bookmarkCount={bookmarkedIds.length}
               />
             </div>
-          </div>
 
-          {/* Category Filter Tabs */}
-          <CategoryFilter
-            activeCategory={activeCategory}
-            onCategoryChange={setActiveCategory}
-            categoryCounts={categoryCounts}
-            totalCount={recipes.length}
-            bookmarkCount={bookmarkedIds.length}
-          />
-        </div>
+            {/* Recipe Grid & List */}
+            <RecipeList
+              recipes={filteredAndSortedRecipes}
+              activeCategory={activeCategory}
+              searchQuery={searchQuery}
+              bookmarkedIds={bookmarkedIds}
+              sortOption={sortOption}
+              onSortChange={setSortOption}
+              onToggleBookmark={handleToggleBookmark}
+              onOpenDetail={handleOpenDetail}
+              onResetFilters={handleResetFilters}
+              onOpenAddRecipe={() => {
+                setRecipeToEdit(null);
+                setIsFormModalOpen(true);
+              }}
+            />
 
-        {/* Recipe Grid & List */}
-        <RecipeList
-          recipes={filteredAndSortedRecipes}
-          activeCategory={activeCategory}
-          searchQuery={searchQuery}
-          bookmarkedIds={bookmarkedIds}
-          sortOption={sortOption}
-          onSortChange={setSortOption}
-          onToggleBookmark={handleToggleBookmark}
-          onOpenDetail={handleOpenDetail}
-          onResetFilters={handleResetFilters}
-          onOpenAddRecipe={() => {
-            setRecipeToEdit(null);
-            setIsFormModalOpen(true);
-          }}
-        />
-
-        {/* Features & Guide Section */}
-        <AboutSection />
+            {/* Features & Guide Section */}
+            <AboutSection
+              onNavigateToAiChef={() => {
+                setAiChefRecipe(null);
+                handleNavigateView('ai-chef');
+              }}
+              onOpenShoppingList={() => setIsShoppingModalOpen(true)}
+              onOpenImportRecipe={() => setIsImportModalOpen(true)}
+              onInstallPwa={handleInstallPwa}
+              canInstallPwa={!!deferredPrompt}
+            />
+          </>
+        )}
       </main>
 
       {/* Floating Action Buttons */}
       <div className="fixed bottom-6 right-6 z-30 flex flex-col items-end gap-2.5">
-        {/* External AI Import Quick Button */}
-        <button
-          type="button"
-          onClick={() => {
-            logger.info('App', '플로팅 AI 레시피 가져오기 클릭');
-            setIsImportModalOpen(true);
-          }}
-          className="flex items-center gap-2 rounded-full border border-orange-200 bg-white/95 px-4 py-2.5 font-soft text-xs font-bold text-orange-800 shadow-lg backdrop-blur-sm transition-all hover:scale-105 hover:bg-orange-50 active:scale-95"
-          title="웹페이지 또는 텍스트에서 AI로 레시피 가져오기"
-        >
-          <Sparkles className="h-4 w-4 text-orange-500" />
-          <span>레시피 가져오기</span>
-        </button>
+        {/* Floating AI Chef Quick Button (when in home view) */}
+        {currentView === 'home' && (
+          <button
+            type="button"
+            onClick={() => {
+              logger.info('App', '플로팅 AI 요리사 클릭');
+              setAiChefRecipe(null);
+              handleNavigateView('ai-chef');
+            }}
+            className="flex items-center gap-2 rounded-full border border-orange-200 bg-white/95 px-4 py-2.5 font-soft text-xs font-bold text-orange-800 shadow-lg backdrop-blur-sm transition-all hover:scale-105 hover:bg-orange-50 active:scale-95"
+            title="AI 요리사에게 질문하기"
+          >
+            <Sparkles className="h-4 w-4 text-orange-500" />
+            <span>✨ AI 요리사</span>
+          </button>
+        )}
 
         {/* Floating Add Recipe Button (+ 레시피 추가) */}
         <button
@@ -694,6 +778,12 @@ export default function App(): React.JSX.Element {
           onAddShoppingItem={handleAddShoppingItem}
           onAddAllShoppingItems={handleAddAllShoppingItems}
           onOpenCookingMode={handleStartCookingMode}
+          onOpenAiModal={(recipe) => {
+            logger.info('App', `레시피 상세에서 AI 요리사 질문 모드 진입: ${recipe.name}`);
+            setSelectedRecipe(null);
+            setAiChefRecipe(recipe);
+            handleNavigateView('ai-chef');
+          }}
           onOpenEditRecipe={(recipe) => {
             setSelectedRecipe(null);
             setRecipeToEdit(recipe);
