@@ -33,16 +33,22 @@ export interface Recipe {
   stepCount: number;
   /** 대표 아이콘 이모지 */
   icon: string;
+  /** 대표 이미지 URL 또는 Base64 (선택) */
+  imageUrl?: string;
   /** 예상 조리시간 (분) - 선택 */
   cookingTimeMinutes?: number;
   /** 난이도 - 선택 */
   difficulty?: '쉬움' | '보통' | '어려움';
-  /** 사용자 생성 레시피 여부 */
+  /** 사용자 생성 또는 커스텀 수정 레시피 여부 */
   isCustom?: boolean;
+  /** 즐겨찾기 등록 여부 (기본 false) */
+  isBookmarked?: boolean;
   /** 사용자 메모 */
   userNotes?: string;
-  /** 등록/수정 일시 */
-  updatedAt?: string;
+  /** 생성 일시 타임스탬프 */
+  createdAt?: number;
+  /** 등록/수정 일시 타임스탬프 또는 ISO 문자열 */
+  updatedAt?: number | string;
 }
 
 /**
@@ -76,4 +82,34 @@ export interface ToastMessage {
 /**
  * 레시피 정렬 기준
  */
-export type SortOption = 'default' | 'nameAsc' | 'nameDesc' | 'ingredientsAsc' | 'ingredientsDesc';
+export type SortOption =
+  | 'default'
+  | 'nameAsc'
+  | 'nameDesc'
+  | 'latest'
+  | 'updated'
+  | 'favorite'
+  | 'ingredientsAsc'
+  | 'ingredientsDesc';
+
+/**
+ * 백업 및 복원용 데이터 포맷 인터페이스
+ */
+export interface RecipeBackupData {
+  /** 앱 식별자 */
+  app: string;
+  /** 데이터 스키마 버전 */
+  version: string;
+  /** 내보낸 일시 (ISO 문자열) */
+  exportedAt: string;
+  /** 전체 레시피 목록 */
+  recipes: Recipe[];
+  /** 즐겨찾기 ID 목록 */
+  bookmarks: number[];
+  /** 사용자 레시피 메모 */
+  userNotes: Record<number, string>;
+  /** 장보기 목록 */
+  shoppingList: ShoppingItem[];
+  /** 최근 본 레시피 ID 목록 */
+  recentRecipeIds?: number[];
+}

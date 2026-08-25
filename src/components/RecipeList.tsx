@@ -1,10 +1,10 @@
 /**
  * @file src/components/RecipeList.tsx
- * @description 레시피 그리드 레이아웃, 정렬 옵션, 검색/필터링 결과 요약 및 검색 결과 없음 상태 뷰 컴포넌트
+ * @description 레시피 그리드 레이아웃, 확장 정렬 옵션, 검색/필터링 결과 요약 및 빈 상태 UI 컴포넌트
  */
 
 import React from 'react';
-import { ArrowUpDown, SearchX, RotateCcw } from 'lucide-react';
+import { ArrowUpDown, SearchX, RotateCcw, PlusCircle } from 'lucide-react';
 import { FilterCategory, Recipe, SortOption } from '../types/recipe';
 import { RecipeCard } from './RecipeCard';
 import { logger } from '../utils/logger';
@@ -28,6 +28,8 @@ interface RecipeListProps {
   onOpenDetail: (recipe: Recipe) => void;
   /** 필터 초기화 핸들러 */
   onResetFilters: () => void;
+  /** 새 레시피 추가 모달 열기 핸들러 */
+  onOpenAddRecipe?: () => void;
 }
 
 /**
@@ -43,6 +45,7 @@ export const RecipeList: React.FC<RecipeListProps> = ({
   onToggleBookmark,
   onOpenDetail,
   onResetFilters,
+  onOpenAddRecipe,
 }) => {
   /**
    * 결과 텍스트를 계산하여 반환합니다.
@@ -54,12 +57,12 @@ export const RecipeList: React.FC<RecipeListProps> = ({
       return `'${searchQuery}' 검색 결과 ${recipes.length}개의 레시피를 찾았습니다.`;
     }
     if (activeCategory === '즐겨찾기') {
-      return `즐겨찾기한 레시피 ${recipes.length}개입니다.`;
+      return `즐겨찾기한 레시피 ${recipes.length}개`;
     }
     if (activeCategory === '전체') {
-      return `전체 ${recipes.length}개의 레시피를 보여주고 있습니다.`;
+      return `전체 ${recipes.length}개의 레시피`;
     }
-    return `${activeCategory} 카테고리에서 ${recipes.length}개의 레시피를 찾았습니다.`;
+    return `${activeCategory} 카테고리 레시피 ${recipes.length}개`;
   };
 
   /**
@@ -93,6 +96,9 @@ export const RecipeList: React.FC<RecipeListProps> = ({
             <option value="default">기본 순서</option>
             <option value="nameAsc">이름 가나다순</option>
             <option value="nameDesc">이름 역순</option>
+            <option value="latest">최근 추가순</option>
+            <option value="updated">최근 수정순</option>
+            <option value="favorite">즐겨찾기 우선순</option>
             <option value="ingredientsAsc">재료 적은 순</option>
             <option value="ingredientsDesc">재료 많은 순</option>
           </select>
@@ -125,19 +131,39 @@ export const RecipeList: React.FC<RecipeListProps> = ({
             <SearchX className="h-8 w-8 text-orange-500" />
           </div>
           <h3 className="mt-4 font-soft text-xl font-black text-stone-800">
-            검색 결과가 없습니다
+            {activeCategory === '즐겨찾기'
+              ? '즐겨찾기한 레시피가 없습니다'
+              : searchQuery.trim()
+              ? `'${searchQuery}' 검색 결과가 없습니다`
+              : '등록된 레시피가 없습니다'}
           </h3>
-          <p className="mt-2 max-w-md text-sm leading-6 text-stone-500">
-            검색어의 철자를 확인하시거나, 다른 카테고리를 선택해 보세요.
+          <p className="mt-2 max-w-md text-xs leading-6 text-stone-500 sm:text-sm">
+            {activeCategory === '즐겨찾기'
+              ? '자주 요리하는 레시피의 북마크(♡) 버튼을 눌러 모아보세요.'
+              : '철자를 확인하시거나 새로운 나만의 레시피를 직접 등록해보세요.'}
           </p>
-          <button
-            type="button"
-            onClick={onResetFilters}
-            className="mt-6 flex items-center gap-2 rounded-2xl bg-orange-500 px-5 py-2.5 text-xs font-extrabold text-white shadow-sm transition hover:bg-orange-600"
-          >
-            <RotateCcw className="h-3.5 w-3.5" />
-            <span>필터 초기화하기</span>
-          </button>
+
+          <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
+            <button
+              type="button"
+              onClick={onResetFilters}
+              className="flex items-center gap-2 rounded-2xl border border-stone-200 bg-white px-4 py-2.5 text-xs font-bold text-stone-700 shadow-sm transition hover:bg-stone-50"
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+              <span>전체 레시피 보기</span>
+            </button>
+
+            {onOpenAddRecipe && (
+              <button
+                type="button"
+                onClick={onOpenAddRecipe}
+                className="flex items-center gap-2 rounded-2xl bg-orange-500 px-5 py-2.5 text-xs font-extrabold text-white shadow-sm transition hover:bg-orange-600"
+              >
+                <PlusCircle className="h-3.5 w-3.5" />
+                <span>새 레시피 등록하기</span>
+              </button>
+            )}
+          </div>
         </div>
       )}
     </section>

@@ -1,24 +1,26 @@
 /**
  * @file src/components/RecipeDetailModal.tsx
- * @description 레시피 상세 모달 창 컴포넌트, 인분 수(배율) 스케일링, 재료 체크리스트, 조리 순서, 장보기 추가, 조리모드 진입, 메모 작성 및 레시피 복사 지원
+ * @description 레시피 상세 정보 모달. 재료 체크박스, 조리 단계별 체크, 인분 조절, 장보기 담기, 요리모드 진입, 레시피 수정/삭제, 메모 영속화 및 고정 헤더 지원
  */
 
 import React, { useState, useEffect } from 'react';
 import {
   X,
   Bookmark,
+  Share2,
   ShoppingCart,
-  Play,
-  Copy,
-  Printer,
-  Edit3,
-  CheckSquare,
-  Square,
+  ChefHat,
   Clock,
   Flame,
   Check,
-  Scale,
+  CheckCircle2,
+  Square,
+  CheckSquare,
+  Edit3,
+  Trash2,
   StickyNote,
+  Copy,
+  Sparkles,
 } from 'lucide-react';
 import { APP_CONFIG, CATEGORY_CONFIG } from '../config/appConfig';
 import { Recipe } from '../types/recipe';
@@ -26,20 +28,26 @@ import { getScaledIngredientsList } from '../utils/scaler';
 import { logger } from '../utils/logger';
 
 interface RecipeDetailModalProps {
-  /** 표시할 레시피 데이터 (null이면 닫힘) */
+  /** 표시할 레시피 데이터 (null이면 미표시) */
   recipe: Recipe | null;
   /** 북마크 여부 */
   isBookmarked: boolean;
-  /** 사용자 저장 메모 */
-  userNote: string;
-  /** 닫기 핸들러 */
-  onClose: () => void;
+  /** 사용자 레시피 메모 */
+  userNote?: string;
   /** 북마크 토글 핸들러 */
   onToggleBookmark: (recipeId: number) => void;
+  /** 모달 닫기 핸들러 */
+  onClose: () => void;
   /** 장보기 목록에 재료 추가 핸들러 */
-  onAddToShoppingList: (items: string[], recipeName: string) => void;
-  /** 조리 모드 시작 핸들러 */
-  onStartCookingMode: (recipe: Recipe, multiplier: number) => void;
+  onAddShoppingItem: (itemText: string, sourceName?: string) => void;
+  /** 장보기 목록 일괄 추가 핸들러 */
+  onAddAllShoppingItems: (items: string[], sourceName?: string) => void;
+  /** 조리 모드 열기 핸들러 */
+  onOpenCookingMode: (recipe: Recipe, multiplier: number) => void;
+  /** 레시피 수정 모달 열기 핸들러 */
+  onOpenEditRecipe: (recipe: Recipe) => void;
+  /** 레시피 삭제 요청 핸들러 */
+  onDeleteRecipe: (recipeId: number) => void;
   /** 사용자 메모 저장 핸들러 */
   onSaveNote: (recipeId: number, note: string) => void;
   /** 토스트 메시지 표시 함수 */
@@ -47,130 +55,144 @@ interface RecipeDetailModalProps {
 }
 
 /**
- * 레시피 상세 팝업 모달 컴포넌트
+ * 레시피 상세 모달 컴포넌트
  */
 export const RecipeDetailModal: React.FC<RecipeDetailModalProps> = ({
   recipe,
   isBookmarked,
-  userNote,
-  onClose,
+  userNote = '',
   onToggleBookmark,
-  onAddToShoppingList,
-  onStartCookingMode,
+  onClose,
+  onAddShoppingItem,
+  onAddAllShoppingItems,
+  onOpenCookingMode,
+  onOpenEditRecipe,
+  onDeleteRecipe,
   onSaveNote,
   showToast,
 }) => {
   const [portionMultiplier, setPortionMultiplier] = useState<number>(1);
   const [checkedIngredients, setCheckedIngredients] = useState<Record<number, boolean>>({});
-  const [isEditingNote, setIsEditingNote] = useState(false);
-  const [noteText, setNoteText] = useState('');
-  const [isCopied, setIsCopied] = useState(false);
+  const [completedSteps, setCompletedSteps] = useState<Record<number, boolean>>({});
+  const [noteInput, setNoteInput] = useState<string>('');
+  const [isCopied, setIsCopied] = useState<boolean>(false);
 
-  // 모달 열릴 때 상태 초기화
+  // 모달 열림 시 상태 초기화 및 바디 스크롤 락
   useEffect(() => {
     if (recipe) {
-      logger.info('RecipeDetailModal.useEffect', `상세 모달 초기화: ${recipe.name}`);
+      logger.info('RecipeDetailModal.useEffect', `레시피 상세 모달 열림: ${recipe.name}`);
       setPortionMultiplier(1);
       setCheckedIngredients({});
-      setNoteText(userNote || '');
-      setIsEditingNote(false);
+      setCompletedSteps({});
+      setNoteInput(userNote || recipe.userNotes || '');
       setIsCopied(false);
+
+      const originalOverflow = document.body.style.overflow;
+      document.body.style.overflow = 'hidden';
+      return () => {
+        document.body.style.overflow = originalOverflow;
+      };
     }
   }, [recipe, userNote]);
-
-  // ESC 키 닫기 이벤트 리스너
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') {
-        logger.info('RecipeDetailModal.handleKeyDown', 'ESC로 상세 모달 닫기');
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onClose]);
 
   if (!recipe) return null;
 
   const categoryMeta = CATEGORY_CONFIG[recipe.category] || CATEGORY_CONFIG['기타'];
+
+  // 재료 배열 파싱 및 스케일링
+  const rawIngredients = recipe.ingredients
+    ? recipe.ingredients
+        .split(/\n+/)
+        .map((s) => s.trim())
+        .filter(Boolean)
+    : [];
+
   const scaledIngredients = getScaledIngredientsList(recipe.ingredients, portionMultiplier);
 
+  // 조리 단계 배열 파싱
+  const rawSteps = recipe.method && recipe.method !== '-'
+    ? recipe.method
+        .split(/\n+/)
+        .map((s) => s.trim())
+        .filter(Boolean)
+    : [];
+
   /**
-   * 조리 단계 파싱
-   * @returns 단계별 문자열 배열
+   * 재료 체크박스 토글
+   * @param idx 재료 인덱스
    */
-  const getSteps = (): string[] => {
-    logger.debug('RecipeDetailModal.getSteps', '조리 단계 파싱');
-    if (!recipe.method || !recipe.method.trim() || recipe.method.trim() === '-') {
-      return [];
+  const handleToggleIngredientCheck = (idx: number): void => {
+    setCheckedIngredients((prev) => {
+      const next = { ...prev, [idx]: !prev[idx] };
+      logger.debug('RecipeDetailModal.handleToggleIngredientCheck', `재료 #${idx} 체크 토글: ${next[idx]}`);
+      return next;
+    });
+  };
+
+  /**
+   * 조리 단계 체크 토글
+   * @param idx 단계 인덱스
+   */
+  const handleToggleStepCheck = (idx: number): void => {
+    setCompletedSteps((prev) => {
+      const next = { ...prev, [idx]: !prev[idx] };
+      logger.debug('RecipeDetailModal.handleToggleStepCheck', `단계 #${idx} 체크 토글: ${next[idx]}`);
+      return next;
+    });
+  };
+
+  /**
+   * 재료 전체 체크/해제 토글
+   */
+  const handleToggleAllIngredients = (): void => {
+    const allChecked = scaledIngredients.every((_, idx) => !!checkedIngredients[idx]);
+    const nextState: Record<number, boolean> = {};
+    if (!allChecked) {
+      scaledIngredients.forEach((_, idx) => {
+        nextState[idx] = true;
+      });
+      showToast('준비 완료로 모두 체크되었습니다.');
     }
-    return recipe.method
-      .split(/\n+/)
-      .map((item) => item.trim())
-      .filter(Boolean);
-  };
-
-  const steps = getSteps();
-
-  /**
-   * 재료 준비 체크박스 토글 핸들러
-   * @param index 재료 인덱스
-   */
-  const handleToggleIngredientCheck = (index: number): void => {
-    logger.info('RecipeDetailModal.handleToggleIngredientCheck', `재료 체크 토글: 인덱스 ${index}`);
-    setCheckedIngredients((prev) => ({
-      ...prev,
-      [index]: !prev[index],
-    }));
+    setCheckedIngredients(nextState);
   };
 
   /**
-   * 장보기 목록에 재료 전체 담기
+   * 장보기 목록에 모든 재료 일괄 담기
    */
   const handleAddAllToShopping = (): void => {
-    logger.info('RecipeDetailModal.handleAddAllToShopping', `장보기 목록 일괄 추가: ${recipe.name}`);
-    onAddToShoppingList(scaledIngredients, recipe.name);
-    showToast(`🛒 '${recipe.name}' 재료가 장보기 목록에 추가되었습니다.`);
+    logger.info('RecipeDetailModal.handleAddAllToShopping', `전체 재료 장보기 담기: ${scaledIngredients.length}개`);
+    onAddAllShoppingItems(scaledIngredients, recipe.name);
+    showToast(`🛒 '${recipe.name}' 재료 ${scaledIngredients.length}개가 장보기 목록에 담겼습니다!`);
   };
 
   /**
-   * 레시피 내용 클립보드 복사
+   * 레시피 텍스트 복사 핸들러
    */
-  const handleCopyRecipeText = async (): Promise<void> => {
+  const handleCopyRecipeText = (): void => {
     logger.info('RecipeDetailModal.handleCopyRecipeText', `레시피 복사: ${recipe.name}`);
-    const textToCopy = `[내 입맛 레시피] ${recipe.name} (${recipe.category})\n\n[재료 (x${portionMultiplier}배)]\n${scaledIngredients.map((i) => `• ${i}`).join('\n')}\n\n[조리 순서]\n${
-      steps.length > 0
-        ? steps.map((s, idx) => `${idx + 1}. ${s}`).join('\n')
-        : '별도 조리법 없음'
-    }\n\n출처: 내 입맛 레시피`;
+    const textToCopy = `[${recipe.name} (${recipe.category})]\n\n■ 재료 (${portionMultiplier}인분/배):\n${scaledIngredients.join(
+      '\n'
+    )}\n\n■ 조리 순서:\n${rawSteps.map((st, i) => `${i + 1}. ${st}`).join('\n')}\n\n- 출처: 내 입맛 레시피`;
 
-    try {
-      await navigator.clipboard.writeText(textToCopy);
-      setIsCopied(true);
-      showToast('📋 레시피 내용이 클립보드에 복사되었습니다.');
-      setTimeout(() => setIsCopied(false), 2000);
-    } catch (err) {
-      logger.error('RecipeDetailModal.handleCopyRecipeText', '클립보드 복사 실패', err);
-      showToast('복사에 실패했습니다. 브라우저 권한을 확인해주세요.');
-    }
+    navigator.clipboard
+      .writeText(textToCopy)
+      .then(() => {
+        setIsCopied(true);
+        showToast('📋 레시피 내용이 클립보드에 복사되었습니다.');
+        setTimeout(() => setIsCopied(false), 2000);
+      })
+      .catch(() => {
+        showToast('⚠️ 복사에 실패했습니다.');
+      });
   };
 
   /**
-   * 브라우저 인쇄 다이얼로그 호출
-   */
-  const handlePrint = (): void => {
-    logger.info('RecipeDetailModal.handlePrint', `레시피 인쇄: ${recipe.name}`);
-    window.print();
-  };
-
-  /**
-   * 사용자 메모 저장
+   * 사용자 메모 저장 핸들러
    */
   const handleSaveNote = (): void => {
-    logger.info('RecipeDetailModal.handleSaveNote', `메모 저장: ${recipe.name}`);
-    onSaveNote(recipe.id, noteText);
-    setIsEditingNote(false);
-    showToast('📝 나만의 팁/메모가 저장되었습니다.');
+    logger.info('RecipeDetailModal.handleSaveNote', `메모 저장: 레시피 ID ${recipe.id}`);
+    onSaveNote(recipe.id, noteInput);
+    showToast('📝 나만의 레시피 메모가 저장되었습니다.');
   };
 
   return (
@@ -178,73 +200,76 @@ export const RecipeDetailModal: React.FC<RecipeDetailModalProps> = ({
       className="fixed inset-0 z-50 flex items-end justify-center bg-stone-950/60 p-0 backdrop-blur-sm sm:items-center sm:p-4"
       role="dialog"
       aria-modal="true"
-      aria-labelledby="modalTitle"
+      aria-labelledby="modalRecipeName"
       onClick={(e) => {
-        if (e.target === e.currentTarget) {
-          onClose();
-        }
+        if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="modal-scroll max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-t-[2rem] bg-white shadow-2xl sm:max-h-[88vh] sm:rounded-[2rem]">
-        {/* Sticky Header */}
-        <div className="sticky top-0 z-20 flex items-center justify-between gap-3 border-b border-orange-100 bg-white/95 px-5 py-4 backdrop-blur sm:px-7">
-          <div className="flex items-center gap-3 min-w-0">
-            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-orange-50 text-2xl shadow-inner">
+      <div className="modal-scroll relative flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden rounded-t-[2rem] bg-white shadow-2xl sm:max-h-[88vh] sm:rounded-[2rem]">
+        {/* Sticky Fixed Header */}
+        <div className="sticky top-0 z-20 flex shrink-0 items-center justify-between border-b border-orange-100 bg-[#fffaf3]/95 px-4 py-3.5 backdrop-blur-md sm:px-6">
+          <div className="flex min-w-0 items-center gap-2.5">
+            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-orange-100 text-lg sm:h-10 sm:w-10 sm:text-xl">
               {recipe.icon || categoryMeta.icon}
             </span>
             <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <span className={`rounded-full px-2.5 py-0.5 text-[10px] font-extrabold ${categoryMeta.badgeClass}`}>
-                  {recipe.category}
-                </span>
-                {recipe.cookingTimeMinutes && (
-                  <span className="flex items-center gap-1 text-xs text-stone-500">
-                    <Clock className="h-3 w-3" />
-                    <span>{recipe.cookingTimeMinutes}분</span>
-                  </span>
-                )}
-                {recipe.difficulty && (
-                  <span className="flex items-center gap-1 text-xs text-stone-500">
-                    <Flame className="h-3 w-3 text-orange-500" />
-                    <span>{recipe.difficulty}</span>
-                  </span>
-                )}
-              </div>
-              <h2 id="modalTitle" className="truncate font-soft text-xl font-black text-stone-900 sm:text-2xl">
+              <span className={`inline-block rounded-md px-2 py-0.5 text-[10px] font-extrabold ${categoryMeta.badgeClass}`}>
+                {recipe.category}
+              </span>
+              <h2 id="modalRecipeName" className="truncate font-soft text-base font-black text-stone-900 sm:text-lg">
                 {recipe.name}
               </h2>
             </div>
           </div>
 
-          {/* Quick Header Actions */}
+          {/* Header Action Tools */}
           <div className="flex items-center gap-1.5 sm:gap-2">
-            {/* Bookmark Toggle */}
+            {/* Edit Button */}
+            <button
+              type="button"
+              onClick={() => {
+                logger.info('RecipeDetailModal', `수정 모달 열기 요청: ${recipe.name}`);
+                onOpenEditRecipe(recipe);
+              }}
+              className="flex h-9 items-center gap-1 rounded-xl border border-stone-200 bg-white px-2.5 text-xs font-bold text-stone-700 shadow-xs transition hover:bg-stone-50"
+              title="레시피 수정"
+              aria-label="레시피 수정하기"
+            >
+              <Edit3 className="h-3.5 w-3.5 text-orange-600" />
+              <span className="hidden sm:inline">수정</span>
+            </button>
+
+            {/* Bookmark Button */}
             <button
               type="button"
               onClick={() => onToggleBookmark(recipe.id)}
-              className={`grid h-9 w-9 place-items-center rounded-full transition ${
-                isBookmarked ? 'bg-amber-100 text-amber-600' : 'bg-stone-100 text-stone-600 hover:bg-orange-100'
+              className={`grid h-9 w-9 place-items-center rounded-xl transition ${
+                isBookmarked
+                  ? 'bg-amber-100 text-amber-600'
+                  : 'bg-stone-100 text-stone-400 hover:bg-orange-100 hover:text-orange-600'
               }`}
-              title="즐겨찾기 토글"
+              title={isBookmarked ? '즐겨찾기 해제' : '즐겨찾기 추가'}
+              aria-label={isBookmarked ? '즐겨찾기 해제' : '즐겨찾기 추가'}
             >
-              <Bookmark className={`h-4 w-4 ${isBookmarked ? 'fill-amber-500' : ''}`} />
+              <Bookmark className={`h-4 w-4 ${isBookmarked ? 'fill-amber-500 text-amber-500' : ''}`} />
             </button>
 
-            {/* Copy Text */}
+            {/* Delete Button (if custom recipe) */}
             <button
               type="button"
-              onClick={handleCopyRecipeText}
-              className="grid h-9 w-9 place-items-center rounded-full bg-stone-100 text-stone-600 transition hover:bg-orange-100 hover:text-orange-700"
-              title="레시피 복사"
+              onClick={() => onDeleteRecipe(recipe.id)}
+              className="grid h-9 w-9 place-items-center rounded-xl text-stone-400 transition hover:bg-red-50 hover:text-red-500"
+              title="레시피 삭제"
+              aria-label="레시피 삭제하기"
             >
-              {isCopied ? <Check className="h-4 w-4 text-green-600" /> : <Copy className="h-4 w-4" />}
+              <Trash2 className="h-4 w-4" />
             </button>
 
             {/* Close Button */}
             <button
               type="button"
               onClick={onClose}
-              className="grid h-9 w-9 place-items-center rounded-full bg-stone-100 text-stone-600 transition hover:bg-red-100 hover:text-red-600"
+              className="grid h-9 w-9 place-items-center rounded-xl bg-stone-100 text-stone-600 transition hover:bg-stone-200"
               aria-label="닫기"
             >
               <X className="h-5 w-5" />
@@ -252,235 +277,250 @@ export const RecipeDetailModal: React.FC<RecipeDetailModalProps> = ({
           </div>
         </div>
 
-        {/* Modal Main Content Grid */}
-        <div className="grid gap-0 lg:grid-cols-[0.88fr_1.12fr]">
-          {/* Left Column: Ingredients & Portion Scaler */}
-          <section className="border-b border-orange-100 bg-[#fffdfa] p-5 sm:p-7 lg:border-b-0 lg:border-r">
-            {/* Portion Scaler Selector */}
-            <div className="rounded-2xl border border-orange-200/80 bg-white p-4 shadow-sm">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-1.5 text-xs font-black text-stone-700">
-                  <Scale className="h-4 w-4 text-orange-600" />
-                  <span>분량(인분) 계량 조절</span>
-                </div>
-                <span className="rounded-lg bg-orange-100 px-2 py-0.5 text-xs font-black text-orange-700">
-                  {portionMultiplier}배 기준
-                </span>
-              </div>
-              <div className="mt-3 flex items-center justify-between gap-1.5">
-                {APP_CONFIG.availablePortionMultipliers.map((mult) => (
-                  <button
-                    key={mult}
-                    type="button"
-                    onClick={() => {
-                      logger.info('RecipeDetailModal', `배율 변경: ${mult}x`);
-                      setPortionMultiplier(mult);
-                    }}
-                    className={`flex-1 rounded-xl py-1.5 text-xs font-black transition ${
-                      portionMultiplier === mult
-                        ? 'bg-orange-500 text-white shadow-sm'
-                        : 'bg-stone-50 text-stone-600 hover:bg-orange-50 hover:text-orange-700'
-                    }`}
-                  >
-                    {mult}x
-                  </button>
-                ))}
-              </div>
+        {/* Scrollable Modal Content */}
+        <div className="flex-1 overflow-y-auto p-5 sm:p-6">
+          {/* Optional Large Photo Display (4:3 aspect ratio) */}
+          {recipe.imageUrl && (
+            <div className="relative mb-5 aspect-[4/3] w-full overflow-hidden rounded-2xl bg-stone-100 shadow-inner">
+              <img
+                src={recipe.imageUrl}
+                alt={recipe.name}
+                loading="lazy"
+                referrerPolicy="no-referrer"
+                className="h-full w-full object-cover"
+              />
             </div>
+          )}
 
-            {/* Ingredients Header & Actions */}
-            <div className="mt-6 flex items-center justify-between">
+          {/* Quick Meta Info Badges */}
+          <div className="flex flex-wrap items-center gap-3 text-xs text-stone-600">
+            {recipe.cookingTimeMinutes && (
+              <span className="flex items-center gap-1 rounded-xl bg-stone-100 px-3 py-1.5 font-bold">
+                <Clock className="h-3.5 w-3.5 text-stone-400" />
+                <span>조리시간 {recipe.cookingTimeMinutes}분</span>
+              </span>
+            )}
+            {recipe.difficulty && (
+              <span className="flex items-center gap-1 rounded-xl bg-stone-100 px-3 py-1.5 font-bold">
+                <Flame className="h-3.5 w-3.5 text-orange-500" />
+                <span>난이도 {recipe.difficulty}</span>
+              </span>
+            )}
+            <span className="rounded-xl bg-orange-50 px-3 py-1.5 font-bold text-orange-700">
+              재료 {scaledIngredients.length}가지
+            </span>
+            {rawSteps.length > 0 && (
+              <span className="rounded-xl bg-amber-50 px-3 py-1.5 font-bold text-amber-700">
+                조리 {rawSteps.length}단계
+              </span>
+            )}
+          </div>
+
+          {/* Focus Cooking Mode Action Banner */}
+          {rawSteps.length > 0 && (
+            <div className="mt-5 flex items-center justify-between rounded-2xl bg-gradient-to-r from-orange-500 to-amber-500 p-4 text-white shadow-md">
+              <div>
+                <h3 className="font-soft text-sm font-extrabold sm:text-base">
+                  🍳 단계별 집중 조리 모드
+                </h3>
+                <p className="text-[11px] text-orange-100">
+                  주방에서 화면 켜짐 유지 & 큰 글씨로 요리하기
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  logger.info('RecipeDetailModal', `집중 조리 모드 시작: ${recipe.name}`);
+                  onOpenCookingMode(recipe, portionMultiplier);
+                }}
+                className="rounded-xl bg-white px-4 py-2 text-xs font-black text-orange-600 shadow-sm transition hover:bg-orange-50 active:scale-95"
+              >
+                요리 시작
+              </button>
+            </div>
+          )}
+
+          {/* Portion Scaling Selector */}
+          <div className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-orange-100 bg-[#fffaf3] p-4">
+            <div>
+              <span className="block text-xs font-bold text-stone-800">
+                분량 및 인분 조절 ({portionMultiplier}배)
+              </span>
+              <span className="text-[11px] text-stone-500">
+                재료의 양이 비율에 맞게 자동 계산됩니다.
+              </span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              {APP_CONFIG.availablePortionMultipliers.map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => setPortionMultiplier(m)}
+                  className={`rounded-lg px-2.5 py-1 text-xs font-bold transition ${
+                    portionMultiplier === m
+                      ? 'bg-orange-500 text-white shadow-xs'
+                      : 'bg-white text-stone-600 hover:bg-orange-100'
+                  }`}
+                >
+                  {m}배
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Section: Ingredients with Checkboxes */}
+          <div className="mt-6">
+            <div className="flex items-center justify-between border-b border-orange-100 pb-2.5">
               <div className="flex items-center gap-2">
-                <span className="text-xl">🛒</span>
-                <h3 className="font-soft text-lg font-black text-stone-900">
+                <h3 className="font-soft text-base font-black text-stone-900">
                   필요한 재료 ({scaledIngredients.length})
                 </h3>
+                <button
+                  type="button"
+                  onClick={handleToggleAllIngredients}
+                  className="rounded-lg bg-stone-100 px-2 py-0.5 text-[11px] font-bold text-stone-600 hover:bg-stone-200"
+                >
+                  전체 체크/해제
+                </button>
               </div>
+
               <button
                 type="button"
                 onClick={handleAddAllToShopping}
-                className="flex items-center gap-1 rounded-xl bg-orange-100 px-2.5 py-1 text-xs font-bold text-orange-700 transition hover:bg-orange-200"
-                title="모든 재료를 장보기 목록에 추가"
+                className="flex items-center gap-1 text-xs font-bold text-orange-600 hover:text-orange-700"
+                title="모든 재료를 장보기 목록에 담기"
               >
                 <ShoppingCart className="h-3.5 w-3.5" />
-                <span>장보기 담기</span>
+                <span>장보기 일괄담기</span>
               </button>
             </div>
 
-            {/* Ingredients Checklist */}
-            <ul className="mt-4 space-y-2">
-              {scaledIngredients.length > 0 ? (
-                scaledIngredients.map((item, idx) => {
-                  const isChecked = !!checkedIngredients[idx];
-                  return (
-                    <li
-                      key={idx}
-                      onClick={() => handleToggleIngredientCheck(idx)}
-                      className={`flex cursor-pointer items-start gap-3 rounded-2xl p-3 text-sm transition ${
-                        isChecked
-                          ? 'bg-stone-100/80 text-stone-400 line-through'
-                          : 'bg-white text-stone-800 shadow-sm ring-1 ring-orange-100 hover:bg-orange-50/50'
-                      }`}
-                    >
-                      <button type="button" className="mt-0.5 text-orange-500">
-                        {isChecked ? (
-                          <CheckSquare className="h-4 w-4 text-stone-400" />
-                        ) : (
-                          <Square className="h-4 w-4 text-orange-400" />
-                        )}
-                      </button>
-                      <span className="flex-1 leading-relaxed font-medium">{item}</span>
-                    </li>
-                  );
-                })
-              ) : (
-                <li className="p-4 text-center text-sm text-stone-400">등록된 재료가 없습니다.</li>
-              )}
-            </ul>
-
-            {/* User Note Section */}
-            <div className="mt-8 rounded-2xl border border-orange-100 bg-amber-50/40 p-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-1.5 text-xs font-black text-amber-900">
-                  <StickyNote className="h-4 w-4 text-amber-600" />
-                  <span>나만의 조리 메모 / 꿀팁</span>
-                </div>
-                {!isEditingNote && (
-                  <button
-                    type="button"
-                    onClick={() => setIsEditingNote(true)}
-                    className="flex items-center gap-1 text-xs font-bold text-amber-700 hover:underline"
+            <ul className="mt-3 space-y-2">
+              {scaledIngredients.map((item, idx) => {
+                const isChecked = !!checkedIngredients[idx];
+                return (
+                  <li
+                    key={idx}
+                    className={`flex items-center justify-between rounded-xl border p-3 text-xs transition ${
+                      isChecked
+                        ? 'border-stone-200 bg-stone-50/80 text-stone-400'
+                        : 'border-orange-100/90 bg-white text-stone-800 hover:border-orange-300'
+                    }`}
                   >
-                    <Edit3 className="h-3 w-3" />
-                    <span>{userNote ? '수정' : '작성하기'}</span>
-                  </button>
-                )}
-              </div>
+                    <label className="flex flex-1 items-center gap-2.5 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={() => handleToggleIngredientCheck(idx)}
+                        className="hidden"
+                      />
+                      {isChecked ? (
+                        <CheckSquare className="h-4 w-4 shrink-0 text-orange-500" />
+                      ) : (
+                        <Square className="h-4 w-4 shrink-0 text-stone-300" />
+                      )}
+                      <span className={isChecked ? 'line-through text-stone-400' : 'font-semibold'}>
+                        {item}
+                      </span>
+                    </label>
 
-              {isEditingNote ? (
-                <div className="mt-2.5">
-                  <textarea
-                    value={noteText}
-                    onChange={(e) => setNoteText(e.target.value)}
-                    placeholder="예: 우리집은 고춧가루를 반 스푼 덜 넣는 게 딱 맞음! 설탕 대신 매실액 추천."
-                    rows={3}
-                    className="w-full rounded-xl border border-amber-200 bg-white p-2.5 text-xs leading-relaxed text-stone-800 outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-200"
-                  />
-                  <div className="mt-2 flex justify-end gap-2">
+                    {/* Single Item Add to Shopping List */}
                     <button
                       type="button"
                       onClick={() => {
-                        setNoteText(userNote || '');
-                        setIsEditingNote(false);
+                        onAddShoppingItem(item, recipe.name);
+                        showToast(`🛒 '${item}'을(를) 장보기 목록에 담았습니다.`);
                       }}
-                      className="rounded-lg px-2.5 py-1 text-xs font-bold text-stone-500 hover:bg-stone-100"
+                      className="ml-2 rounded-lg p-1.5 text-stone-400 hover:bg-orange-50 hover:text-orange-600"
+                      title="이 재료만 장보기 담기"
                     >
-                      취소
+                      <ShoppingCart className="h-3.5 w-3.5" />
                     </button>
-                    <button
-                      type="button"
-                      onClick={handleSaveNote}
-                      className="rounded-lg bg-amber-600 px-3 py-1 text-xs font-bold text-white transition hover:bg-amber-700"
-                    >
-                      저장
-                    </button>
-                  </div>
-                </div>
-              ) : userNote ? (
-                <p className="mt-2 text-xs leading-relaxed text-amber-950 whitespace-pre-line">
-                  {userNote}
-                </p>
-              ) : (
-                <p className="mt-1 text-[11px] text-amber-800/60">
-                  이 레시피를 요리하면서 나만의 간 조절 팁이나 메모를 남겨보세요.
-                </p>
-              )}
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+
+          {/* Section: Cooking Method with Step Check */}
+          <div className="mt-8">
+            <div className="flex items-center justify-between border-b border-orange-100 pb-2.5">
+              <h3 className="font-soft text-base font-black text-stone-900">
+                조리 순서 {rawSteps.length > 0 && `(${rawSteps.length}단계)`}
+              </h3>
+              <span className="text-[11px] text-stone-400">완료한 단계는 클릭하여 체크</span>
             </div>
-          </section>
 
-          {/* Right Column: Cooking Steps */}
-          <section className="flex flex-col justify-between p-5 sm:p-7">
-            <div>
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <span className="text-xl">👩‍🍳</span>
-                  <h3 className="font-soft text-lg font-black text-stone-900">
-                    조리 방법 ({steps.length}단계)
-                  </h3>
-                </div>
-
-                {/* Big CTA for Focus Cooking Mode */}
-                {steps.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      logger.info('RecipeDetailModal', `조리 모드 시작: ${recipe.name}`);
-                      onStartCookingMode(recipe, portionMultiplier);
-                    }}
-                    className="flex items-center gap-1.5 rounded-2xl bg-gradient-to-r from-orange-500 to-amber-500 px-4 py-2 text-xs font-black text-white shadow-md shadow-orange-500/20 transition hover:from-orange-600 hover:to-amber-600 hover:scale-105"
-                  >
-                    <Play className="h-3.5 w-3.5 fill-current" />
-                    <span>조리 모드 시작</span>
-                  </button>
-                )}
-              </div>
-
-              {/* Steps List */}
-              <ol className="mt-5 space-y-4">
-                {steps.length > 0 ? (
-                  steps.map((step, idx) => (
+            {rawSteps.length > 0 ? (
+              <ol className="mt-3 space-y-3">
+                {rawSteps.map((step, idx) => {
+                  const isDone = !!completedSteps[idx];
+                  return (
                     <li
                       key={idx}
-                      className="group flex gap-3.5 rounded-2xl border border-stone-100 bg-stone-50/50 p-4 transition hover:bg-white hover:shadow-sm"
+                      onClick={() => handleToggleStepCheck(idx)}
+                      className={`flex cursor-pointer items-start gap-3 rounded-2xl border p-4 transition ${
+                        isDone
+                          ? 'border-emerald-200 bg-emerald-50/40 text-stone-500'
+                          : 'border-orange-100/90 bg-white text-stone-800 hover:border-orange-300'
+                      }`}
                     >
-                      <span className="grid h-7 w-7 shrink-0 place-items-center rounded-xl bg-orange-500 text-xs font-black text-white shadow-sm">
-                        {idx + 1}
-                      </span>
-                      <p className="pt-0.5 text-sm leading-relaxed text-stone-700 sm:text-[15px]">
+                      <div
+                        className={`grid h-6 w-6 shrink-0 place-items-center rounded-full text-xs font-black transition ${
+                          isDone
+                            ? 'bg-emerald-500 text-white'
+                            : 'bg-orange-100 text-orange-700'
+                        }`}
+                      >
+                        {isDone ? <Check className="h-3.5 w-3.5" /> : idx + 1}
+                      </div>
+                      <p className={`flex-1 text-xs sm:text-sm leading-relaxed ${isDone ? 'line-through text-stone-400' : ''}`}>
                         {step}
                       </p>
                     </li>
-                  ))
-                ) : (
-                  <li className="rounded-2xl border border-dashed border-orange-200 bg-orange-50/60 p-6 text-center text-sm leading-7 text-stone-600">
-                    💡 엑셀 원본에 별도 조리 순서가 입력되어 있지 않습니다.
-                    <br />
-                    위의 재료를 참고하여 자유롭게 조리해 보세요.
-                  </li>
-                )}
+                  );
+                })}
               </ol>
-            </div>
+            ) : (
+              <p className="mt-3 text-xs text-stone-400">상세 조리 순서 정보가 등록되어 있지 않습니다.</p>
+            )}
+          </div>
 
-            {/* Bottom Footer Tool Buttons */}
-            <div className="mt-8 flex flex-wrap items-center justify-between gap-3 border-t border-stone-100 pt-5">
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handlePrint}
-                  className="flex items-center gap-1.5 rounded-xl border border-stone-200 px-3 py-2 text-xs font-bold text-stone-600 transition hover:bg-stone-50"
-                >
-                  <Printer className="h-3.5 w-3.5" />
-                  <span>인쇄하기</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={handleCopyRecipeText}
-                  className="flex items-center gap-1.5 rounded-xl border border-stone-200 px-3 py-2 text-xs font-bold text-stone-600 transition hover:bg-stone-50"
-                >
-                  <Copy className="h-3.5 w-3.5" />
-                  <span>텍스트 복사</span>
-                </button>
+          {/* Section: Personal Recipe Notes */}
+          <div className="mt-8 rounded-2xl border border-amber-200 bg-amber-50/40 p-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5 font-soft text-xs font-bold text-amber-900">
+                <StickyNote className="h-4 w-4 text-amber-600" />
+                <span>나만의 조리 팁 & 메모</span>
               </div>
-
               <button
                 type="button"
-                onClick={onClose}
-                className="rounded-xl bg-stone-900 px-5 py-2.5 text-xs font-black text-white transition hover:bg-stone-800"
+                onClick={handleSaveNote}
+                className="rounded-lg bg-amber-500 px-2.5 py-1 text-[11px] font-bold text-white shadow-xs hover:bg-amber-600"
               >
-                닫기
+                메모 저장
               </button>
             </div>
-          </section>
+            <textarea
+              rows={2}
+              value={noteInput}
+              onChange={(e) => setNoteInput(e.target.value)}
+              placeholder="예: 물 1스푼 추가하면 더 촉촉함, 우리 집 고춧가루는 매우니 0.5스푼만 넣기"
+              className="mt-2.5 w-full rounded-xl border border-amber-200 bg-white p-2.5 text-xs leading-relaxed text-stone-800 outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100"
+            />
+          </div>
+
+          {/* Quick Copy Recipe Button */}
+          <div className="mt-6 flex justify-end">
+            <button
+              type="button"
+              onClick={handleCopyRecipeText}
+              className="flex items-center gap-1.5 rounded-xl border border-stone-200 bg-white px-3 py-2 text-xs font-bold text-stone-600 transition hover:bg-stone-50"
+            >
+              {isCopied ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
+              <span>{isCopied ? '복사 완료!' : '레시피 텍스트 복사'}</span>
+            </button>
+          </div>
         </div>
       </div>
     </div>

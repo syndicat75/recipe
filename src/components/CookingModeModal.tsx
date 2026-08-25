@@ -1,20 +1,21 @@
 /**
  * @file src/components/CookingModeModal.tsx
- * @description 주방에서 요리 중 한 단계씩 크게 보며 따라 할 수 있는 집중 조리 모드(Focus Cooking Mode) 뷰 컴포넌트
+ * @description 주방에서 요리 중 한 단계씩 크게 보며 따라 할 수 있는 집중 조리 모드(Focus Cooking Mode) 뷰. Screen Wake Lock API를 통한 화면 꺼짐 방지 지원
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   X,
   ChevronLeft,
   ChevronRight,
-  CheckCircle,
   Timer,
   Play,
   Pause,
   RotateCcw,
   Sparkles,
   List,
+  Sun,
+  CheckCircle2,
 } from 'lucide-react';
 import { Recipe } from '../types/recipe';
 import { getScaledIngredientsList } from '../utils/scaler';
@@ -47,8 +48,13 @@ export const CookingModeModal: React.FC<CookingModeModalProps> = ({
   // Step Stopwatch/Timer state
   const [timerSeconds, setTimerSeconds] = useState<number>(0);
   const [isTimerRunning, setIsTimerRunning] = useState<boolean>(false);
+  const [isWakeLockActive, setIsWakeLockActive] = useState<boolean>(false);
 
-  // 초기화
+  // WakeLock Sentinel Ref
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const wakeLockRef = useRef<any>(null);
+
+  // 초기화 및 Screen Wake Lock 요청
   useEffect(() => {
     if (recipe) {
       logger.info('CookingModeModal.useEffect', `조리 모드 시작: ${recipe.name}`);
@@ -56,6 +62,34 @@ export const CookingModeModal: React.FC<CookingModeModalProps> = ({
       setIsCompleted(false);
       setTimerSeconds(0);
       setIsTimerRunning(false);
+
+      const originalOverflow = document.body.style.overflow;
+      document.body.style.overflow = 'hidden';
+
+      // Screen Wake Lock API 요청
+      const requestWakeLock = async () => {
+        try {
+          if ('wakeLock' in navigator) {
+            wakeLockRef.current = await (navigator as any).wakeLock.request('screen');
+            setIsWakeLockActive(true);
+            logger.info('CookingModeModal', 'Screen Wake Lock 획득 성공 (화면 켜짐 유지)');
+          }
+        } catch (err) {
+          logger.warn('CookingModeModal', 'Screen Wake Lock 요청 실패 또는 미지원', err);
+          setIsWakeLockActive(false);
+        }
+      };
+
+      requestWakeLock();
+
+      return () => {
+        document.body.style.overflow = originalOverflow;
+        if (wakeLockRef.current) {
+          wakeLockRef.current.release().catch(() => {});
+          wakeLockRef.current = null;
+          logger.info('CookingModeModal', 'Screen Wake Lock 해제');
+        }
+      };
     }
   }, [recipe]);
 
@@ -74,7 +108,7 @@ export const CookingModeModal: React.FC<CookingModeModalProps> = ({
 
   if (!recipe) return null;
 
-  const rawSteps = recipe.method
+  const rawSteps = recipe.method && recipe.method !== '-'
     ? recipe.method
         .split(/\n+/)
         .map((s) => s.trim())
@@ -125,7 +159,7 @@ export const CookingModeModal: React.FC<CookingModeModalProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex flex-col bg-stone-900 text-white"
+      className="fixed inset-0 z-50 flex flex-col bg-stone-900 text-white animate-fade-in"
       role="dialog"
       aria-modal="true"
     >
@@ -137,7 +171,15 @@ export const CookingModeModal: React.FC<CookingModeModalProps> = ({
             <h2 className="font-soft text-base font-black text-white sm:text-lg">
               {recipe.name} <span className="text-xs text-orange-400 font-bold">({portionMultiplier}배 분량)</span>
             </h2>
-            <p className="text-[11px] font-semibold text-stone-400">집중 조리 모드</p>
+            <div className="flex items-center gap-2">
+              <p className="text-[11px] font-semibold text-stone-400">집중 조리 모드</p>
+              {isWakeLockActive && (
+                <span className="flex items-center gap-1 rounded-md bg-emerald-950/80 px-1.5 py-0.2 text-[10px] font-bold text-emerald-400 border border-emerald-800">
+                  <Sun className="h-2.5 w-2.5" />
+                  <span>화면 켜짐 유지중</span>
+                </span>
+              )}
+            </div>
           </div>
         </div>
 
@@ -181,7 +223,7 @@ export const CookingModeModal: React.FC<CookingModeModalProps> = ({
             <div className="flex items-center justify-between text-xs font-bold text-stone-400 mb-2">
               <span>진행 상황</span>
               <span className="text-orange-400 font-extrabold">
-                {isCompleted ? '완료' : `${currentStepIndex + 1} / ${totalSteps} 단계`}
+                {isCompleted ? '요리 완성' : `${currentStepIndex + 1} / ${totalSteps} 단계`}
               </span>
             </div>
             <div className="h-2.5 w-full overflow-hidden rounded-full bg-stone-800">
@@ -197,7 +239,7 @@ export const CookingModeModal: React.FC<CookingModeModalProps> = ({
           {/* Step Text Container */}
           <div className="mx-auto my-auto max-w-3xl py-8 text-center">
             {isCompleted ? (
-              <div className="flex flex-col items-center animate-fade-in">
+              <div className="flex flex-col items-center">
                 <div className="grid h-24 w-24 place-items-center rounded-full bg-orange-500/20 text-orange-400 ring-8 ring-orange-500/10">
                   <Sparkles className="h-12 w-12" />
                 </div>

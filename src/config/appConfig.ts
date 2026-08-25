@@ -12,18 +12,24 @@ export const APP_CONFIG = {
   appName: '내 입맛 레시피',
   appSubTitle: 'MY FAVORITE RECIPES',
   appDescription: '내가 좋아하는 음식 레시피를 한눈에 찾아보고 계량 조절, 타이머, 조리모드, 장보기 목록을 활용하는 개인 레시피 북',
-  version: '1.0.0',
+  version: '1.1.0',
   storageKeys: {
-    customRecipes: 'my_recipe_custom_recipes_v1',
+    /** 통합 레시피 목록 키 */
+    allRecipes: 'my_recipe_all_recipes_v2',
+    /** 이전 버전 호환용 커스텀 레시피 키 */
+    customRecipesLegacy: 'my_recipe_custom_recipes_v1',
     bookmarks: 'my_recipe_bookmarks_v1',
     shoppingList: 'my_recipe_shopping_list_v1',
     recipeNotes: 'my_recipe_user_notes_v1',
+    recentRecipes: 'my_recipe_recent_viewed_v1',
     theme: 'my_recipe_theme_preference_v1',
   },
+  maxRecentRecipes: 5,
   defaultPortionMultiplier: 1,
   availablePortionMultipliers: [0.5, 1, 1.5, 2, 3, 4],
   defaultTimerMinutes: 3,
   timerPresets: [1, 3, 5, 7, 10, 15, 20],
+  defaultEmojis: ['🍳', '🥘', '🥗', '🥣', '🍽️', '🍛', '🍚', '🥪', '🍜', '🥩', '🦐', '🍝', '🥟', '🍲', '🍢', '🍣'],
 } as const;
 
 /**
@@ -94,4 +100,5 @@ export const CATEGORY_LIST: RecipeCategory[] = [
   '중식·양식',
   '밥·한그릇',
   '계란요리',
+  '기타',
 ];

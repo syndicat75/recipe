@@ -1,10 +1,21 @@
 /**
  * @file src/components/Header.tsx
- * @description 웹앱 상단 네비게이션 바, 브랜드 로고, 즐겨찾기/장보기/레시피 추가/타이머 빠른 실행 및 모바일 반응형 메뉴
+ * @description 웹앱 상단 네비게이션 바, 브랜드 로고, 즐겨찾기/장보기/레시피 추가/데이터 백업/타이머 빠른 실행 및 모바일 반응형 메뉴
  */
 
 import React, { useState } from 'react';
-import { Bookmark, ShoppingCart, PlusCircle, Timer, Menu, X, ChefHat } from 'lucide-react';
+import {
+  Bookmark,
+  ShoppingCart,
+  PlusCircle,
+  Timer,
+  Menu,
+  X,
+  Database,
+  HelpCircle,
+  Home,
+  BookOpen,
+} from 'lucide-react';
 import { APP_CONFIG } from '../config/appConfig';
 import { FilterCategory } from '../types/recipe';
 import { logger } from '../utils/logger';
@@ -22,6 +33,8 @@ interface HeaderProps {
   onOpenShoppingList: () => void;
   /** 레시피 추가 모달 열기 핸들러 */
   onOpenAddRecipe: () => void;
+  /** 백업/복원 모달 열기 핸들러 */
+  onOpenBackupRestore: () => void;
   /** 타이머 위젯 토글 핸들러 */
   onToggleTimer: () => void;
   /** 타이머 활성화 여부 */
@@ -38,6 +51,7 @@ export const Header: React.FC<HeaderProps> = ({
   shoppingCount,
   onOpenShoppingList,
   onOpenAddRecipe,
+  onOpenBackupRestore,
   onToggleTimer,
   isTimerOpen,
 }) => {
@@ -135,13 +149,22 @@ export const Header: React.FC<HeaderProps> = ({
                 : 'text-stone-600 hover:bg-orange-100 hover:text-orange-800'
             }`}
           >
-            <Bookmark className="h-3.5 w-3.5 fill-current" />
+            <Bookmark className="h-3.5 w-3.5 fill-current text-amber-500" />
             <span>즐겨찾기</span>
             {bookmarkCount > 0 && (
               <span className="rounded-full bg-amber-500 px-1.5 py-0.2 text-[10px] font-black text-white">
                 {bookmarkCount}
               </span>
             )}
+          </button>
+          <button
+            type="button"
+            onClick={onOpenBackupRestore}
+            className="flex items-center gap-1 rounded-full px-3.5 py-1.5 text-sm font-semibold text-stone-600 transition hover:bg-orange-100 hover:text-orange-800"
+            title="데이터 백업 및 복원"
+          >
+            <Database className="h-3.5 w-3.5 text-stone-500" />
+            <span>백업/복원</span>
           </button>
           <button
             type="button"
@@ -229,30 +252,45 @@ export const Header: React.FC<HeaderProps> = ({
               onClick={() => {
                 scrollToSection('home');
               }}
-              className="rounded-xl bg-orange-50 px-4 py-3 text-center text-sm font-bold text-stone-700 transition hover:bg-orange-100"
+              className="flex items-center justify-center gap-1.5 rounded-xl bg-orange-50 px-4 py-3 text-center text-sm font-bold text-stone-700 transition hover:bg-orange-100"
             >
-              🏠 홈으로
+              <Home className="h-4 w-4 text-orange-600" />
+              <span>홈으로</span>
             </button>
             <button
               type="button"
               onClick={() => handleNavClick('전체')}
-              className="rounded-xl bg-orange-50 px-4 py-3 text-center text-sm font-bold text-stone-700 transition hover:bg-orange-100"
+              className="flex items-center justify-center gap-1.5 rounded-xl bg-orange-50 px-4 py-3 text-center text-sm font-bold text-stone-700 transition hover:bg-orange-100"
             >
-              📖 전체 레시피
+              <BookOpen className="h-4 w-4 text-orange-600" />
+              <span>전체 레시피</span>
             </button>
             <button
               type="button"
               onClick={() => handleNavClick('즐겨찾기')}
-              className="flex items-center justify-center gap-1 rounded-xl bg-amber-50 px-4 py-3 text-center text-sm font-bold text-amber-800 transition hover:bg-amber-100"
+              className="flex items-center justify-center gap-1.5 rounded-xl bg-amber-50 px-4 py-3 text-center text-sm font-bold text-amber-800 transition hover:bg-amber-100"
             >
-              ⭐ 즐겨찾기 ({bookmarkCount})
+              <Bookmark className="h-4 w-4 fill-amber-500 text-amber-500" />
+              <span>즐겨찾기 ({bookmarkCount})</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                onOpenBackupRestore();
+                setIsMobileMenuOpen(false);
+              }}
+              className="flex items-center justify-center gap-1.5 rounded-xl bg-orange-50 px-4 py-3 text-center text-sm font-bold text-stone-700 transition hover:bg-orange-100"
+            >
+              <Database className="h-4 w-4 text-orange-600" />
+              <span>백업/복원</span>
             </button>
             <button
               type="button"
               onClick={() => scrollToSection('about')}
-              className="rounded-xl bg-orange-50 px-4 py-3 text-center text-sm font-bold text-stone-700 transition hover:bg-orange-100"
+              className="col-span-2 flex items-center justify-center gap-1.5 rounded-xl bg-orange-50 px-4 py-2.5 text-center text-sm font-bold text-stone-700 transition hover:bg-orange-100"
             >
-              💡 이용안내
+              <HelpCircle className="h-4 w-4 text-stone-500" />
+              <span>이용안내</span>
             </button>
           </div>
         </div>
