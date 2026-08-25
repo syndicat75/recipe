@@ -1,0 +1,36 @@
+@import "tailwindcss";
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    font-family: 'Noto Sans KR', sans-serif;
+  }
+}
+
+.font-soft {
+  font-family: 'Gowun Dodum', 'Noto Sans KR', sans-serif;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.modal-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+
+.modal-scroll::-webkit-scrollbar-thumb {
+  background: #fed7aa;
+  border-radius: 9999px;
+  border: 2px solid white;
+}
+
+.modal-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
