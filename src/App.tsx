@@ -33,6 +33,7 @@ import { CookingModeModal } from './components/CookingModeModal';
 import { RecipeFormModal } from './components/RecipeFormModal';
 import { ShoppingListModal } from './components/ShoppingListModal';
 import { BackupRestoreModal } from './components/BackupRestoreModal';
+import { ImportRecipeModal } from './components/ImportRecipeModal';
 import { ConfirmModal } from './components/ConfirmModal';
 import { TimerWidget } from './components/TimerWidget';
 import { AboutSection } from './components/AboutSection';
@@ -63,9 +64,15 @@ export default function App(): React.JSX.Element {
   const [recipeToEdit, setRecipeToEdit] = useState<Recipe | null>(null);
   const [isShoppingModalOpen, setIsShoppingModalOpen] = useState<boolean>(false);
   const [isBackupModalOpen, setIsBackupModalOpen] = useState<boolean>(false);
+  const [isImportModalOpen, setIsImportModalOpen] = useState<boolean>(false);
   const [isTimerOpen, setIsTimerOpen] = useState<boolean>(false);
 
-  // 4. Confirm Dialog State
+  // 4. PWA & Offline State
+  const [isOffline, setIsOffline] = useState<boolean>(!navigator.onLine);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+
+  // 5. Confirm Dialog State
   const [confirmDialog, setConfirmDialog] = useState<{
     isOpen: boolean;
     title: string;
@@ -82,7 +89,7 @@ export default function App(): React.JSX.Element {
     onConfirm: () => {},
   });
 
-  // 5. Toast System State
+  // 6. Toast System State
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
   /**
@@ -107,6 +114,55 @@ export default function App(): React.JSX.Element {
     logger.debug('App.handleDismissToast', `토스트 수동 닫기: ${id}`);
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
+
+  // PWA 설치 프롬프트 및 온/오프라인 이벤트 리스너 등록
+  useEffect(() => {
+    const handleOnline = (): void => {
+      logger.info('App.network', '온라인 상태 복구');
+      setIsOffline(false);
+      showToast('🟢 네트워크가 연결되었습니다.');
+    };
+    const handleOffline = (): void => {
+      logger.warn('App.network', '오프라인 상태 감지');
+      setIsOffline(true);
+      showToast('⚠️ 오프라인 상태입니다. 저장된 레시피를 오프라인으로 이용할 수 있습니다.');
+    };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const handleBeforeInstall = (e: any): void => {
+      e.preventDefault();
+      logger.info('App.pwa', 'PWA 설치 프롬프트 수신');
+      setDeferredPrompt(e);
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    window.addEventListener('beforeinstallprompt', handleBeforeInstall);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
+    };
+  }, [showToast]);
+
+  /**
+   * PWA 설치 핸들러
+   */
+  const handleInstallPwa = useCallback(async (): Promise<void> => {
+    if (!deferredPrompt) {
+      showToast('💡 이미 설치되었거나 브라우저 메뉴의 "홈 화면에 추가"를 이용해주세요.');
+      return;
+    }
+    logger.info('App.handleInstallPwa', 'PWA 설치 프롬프트 표시');
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    logger.info('App.handleInstallPwa', `PWA 설치 결과: ${outcome}`);
+    if (outcome === 'accepted') {
+      showToast('🎉 앱이 성공적으로 설치되었습니다!');
+    }
+    setDeferredPrompt(null);
+  }, [deferredPrompt, showToast]);
 
   // 로컬스토리지 데이터 초기 로드
   useEffect(() => {
@@ -268,6 +324,19 @@ export default function App(): React.JSX.Element {
       }
     },
     [selectedRecipe]
+  );
+
+  /**
+   * 외부 AI 레시피 가져오기 성공 후 등록 핸들러
+   * @param recipe AI 분석된 레시피 데이터
+   */
+  const handleImportRecipeSuccess = useCallback(
+    (recipe: Recipe): void => {
+      logger.info('App.handleImportRecipeSuccess', `가져온 레시피 추가: ${recipe.name}`);
+      handleSaveRecipe(recipe, false, '');
+      showToast(`🎉 '${recipe.name}' 레시피가 성공적으로 등록되었습니다!`);
+    },
+    [handleSaveRecipe, showToast]
   );
 
   /**
@@ -497,9 +566,13 @@ export default function App(): React.JSX.Element {
           setRecipeToEdit(null);
           setIsFormModalOpen(true);
         }}
+        onOpenImportRecipe={() => setIsImportModalOpen(true)}
         onOpenBackupRestore={() => setIsBackupModalOpen(true)}
         onToggleTimer={() => setIsTimerOpen((prev) => !prev)}
         isTimerOpen={isTimerOpen}
+        canInstallPwa={!!deferredPrompt}
+        onInstallPwa={handleInstallPwa}
+        isOffline={isOffline}
       />
 
       <main>
@@ -575,20 +648,37 @@ export default function App(): React.JSX.Element {
         <AboutSection />
       </main>
 
-      {/* Floating Action Button (+ 레시피 추가) */}
-      <button
-        type="button"
-        onClick={() => {
-          logger.info('App', '플로팅 레시피 추가 버튼 클릭');
-          setRecipeToEdit(null);
-          setIsFormModalOpen(true);
-        }}
-        className="fixed bottom-6 right-6 z-30 flex items-center gap-2 rounded-full bg-gradient-to-r from-orange-500 to-amber-500 px-5 py-3.5 font-soft text-sm font-black text-white shadow-xl shadow-orange-500/30 transition-all hover:scale-105 hover:from-orange-600 hover:to-amber-600 active:scale-95"
-        aria-label="새 레시피 등록하기"
-      >
-        <Plus className="h-5 w-5" />
-        <span>레시피 추가</span>
-      </button>
+      {/* Floating Action Buttons */}
+      <div className="fixed bottom-6 right-6 z-30 flex flex-col items-end gap-2.5">
+        {/* External AI Import Quick Button */}
+        <button
+          type="button"
+          onClick={() => {
+            logger.info('App', '플로팅 AI 레시피 가져오기 클릭');
+            setIsImportModalOpen(true);
+          }}
+          className="flex items-center gap-2 rounded-full border border-orange-200 bg-white/95 px-4 py-2.5 font-soft text-xs font-bold text-orange-800 shadow-lg backdrop-blur-sm transition-all hover:scale-105 hover:bg-orange-50 active:scale-95"
+          title="웹페이지 또는 텍스트에서 AI로 레시피 가져오기"
+        >
+          <Sparkles className="h-4 w-4 text-orange-500" />
+          <span>레시피 가져오기</span>
+        </button>
+
+        {/* Floating Add Recipe Button (+ 레시피 추가) */}
+        <button
+          type="button"
+          onClick={() => {
+            logger.info('App', '플로팅 레시피 추가 버튼 클릭');
+            setRecipeToEdit(null);
+            setIsFormModalOpen(true);
+          }}
+          className="flex items-center gap-2 rounded-full bg-gradient-to-r from-orange-500 to-amber-500 px-5 py-3.5 font-soft text-sm font-black text-white shadow-xl shadow-orange-500/30 transition-all hover:scale-105 hover:from-orange-600 hover:to-amber-600 active:scale-95"
+          aria-label="새 레시피 등록하기"
+        >
+          <Plus className="h-5 w-5" />
+          <span>레시피 추가</span>
+        </button>
+      </div>
 
       {/* Footer */}
       <Footer />
@@ -637,6 +727,14 @@ export default function App(): React.JSX.Element {
         }}
         onSaveRecipe={handleSaveRecipe}
         onDeleteRecipe={handleDeleteRecipeRequest}
+        showToast={showToast}
+      />
+
+      {/* External AI Recipe Import Modal */}
+      <ImportRecipeModal
+        isOpen={isImportModalOpen}
+        onClose={() => setIsImportModalOpen(false)}
+        onImportSuccess={handleImportRecipeSuccess}
         showToast={showToast}
       />
 

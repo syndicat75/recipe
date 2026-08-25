@@ -46,6 +46,8 @@ interface RecipeDetailModalProps {
   onOpenCookingMode: (recipe: Recipe, multiplier: number) => void;
   /** 레시피 수정 모달 열기 핸들러 */
   onOpenEditRecipe: (recipe: Recipe) => void;
+  /** AI 질의응답 모달 열기 핸들러 */
+  onOpenAiModal?: (recipe: Recipe) => void;
   /** 레시피 삭제 요청 핸들러 */
   onDeleteRecipe: (recipeId: number) => void;
   /** 사용자 메모 저장 핸들러 */
@@ -67,6 +69,7 @@ export const RecipeDetailModal: React.FC<RecipeDetailModalProps> = ({
   onAddAllShoppingItems,
   onOpenCookingMode,
   onOpenEditRecipe,
+  onOpenAiModal,
   onDeleteRecipe,
   onSaveNote,
   showToast,
@@ -316,29 +319,56 @@ export const RecipeDetailModal: React.FC<RecipeDetailModalProps> = ({
             )}
           </div>
 
-          {/* Focus Cooking Mode Action Banner */}
-          {rawSteps.length > 0 && (
-            <div className="mt-5 flex items-center justify-between rounded-2xl bg-gradient-to-r from-orange-500 to-amber-500 p-4 text-white shadow-md">
-              <div>
-                <h3 className="font-soft text-sm font-extrabold sm:text-base">
-                  🍳 단계별 집중 조리 모드
-                </h3>
-                <p className="text-[11px] text-orange-100">
-                  주방에서 화면 켜짐 유지 & 큰 글씨로 요리하기
-                </p>
+          {/* Focus Cooking Mode & AI Assistant Action Banners */}
+          <div className="mt-5 grid gap-3 sm:grid-cols-2">
+            {rawSteps.length > 0 && (
+              <div className="flex items-center justify-between rounded-2xl bg-gradient-to-r from-orange-500 to-amber-500 p-4 text-white shadow-md">
+                <div>
+                  <h3 className="font-soft text-sm font-extrabold">
+                    🍳 집중 조리 모드
+                  </h3>
+                  <p className="text-[11px] text-orange-100">
+                    화면 꺼짐 방지 & 큰 글씨
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    logger.info('RecipeDetailModal', `집중 조리 모드 시작: ${recipe.name}`);
+                    onOpenCookingMode(recipe, portionMultiplier);
+                  }}
+                  className="rounded-xl bg-white px-3.5 py-2 text-xs font-black text-orange-600 shadow-sm transition hover:bg-orange-50 active:scale-95"
+                >
+                  요리 시작
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={() => {
-                  logger.info('RecipeDetailModal', `집중 조리 모드 시작: ${recipe.name}`);
-                  onOpenCookingMode(recipe, portionMultiplier);
-                }}
-                className="rounded-xl bg-white px-4 py-2 text-xs font-black text-orange-600 shadow-sm transition hover:bg-orange-50 active:scale-95"
-              >
-                요리 시작
-              </button>
-            </div>
-          )}
+            )}
+
+            {/* AI Recipe Assistant Button */}
+            {onOpenAiModal && (
+              <div className="flex items-center justify-between rounded-2xl border border-amber-200 bg-gradient-to-r from-amber-50 to-orange-50 p-4 shadow-xs">
+                <div>
+                  <div className="flex items-center gap-1 font-soft text-sm font-extrabold text-amber-900">
+                    <Sparkles className="h-4 w-4 text-amber-600" />
+                    <span>AI에게 물어보기</span>
+                  </div>
+                  <p className="text-[11px] text-amber-800">
+                    대체 재료 · 특급 비법 · 곁들임 추천
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    logger.info('RecipeDetailModal', `AI 질문 모달 열기: ${recipe.name}`);
+                    onOpenAiModal(recipe);
+                  }}
+                  className="rounded-xl bg-amber-500 px-3.5 py-2 text-xs font-black text-white shadow-sm transition hover:bg-amber-600 active:scale-95"
+                >
+                  질문하기
+                </button>
+              </div>
+            )}
+          </div>
 
           {/* Portion Scaling Selector */}
           <div className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-orange-100 bg-[#fffaf3] p-4">

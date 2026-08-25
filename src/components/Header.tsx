@@ -15,6 +15,9 @@ import {
   HelpCircle,
   Home,
   BookOpen,
+  Sparkles,
+  Download,
+  WifiOff,
 } from 'lucide-react';
 import { APP_CONFIG } from '../config/appConfig';
 import { FilterCategory } from '../types/recipe';
@@ -33,12 +36,20 @@ interface HeaderProps {
   onOpenShoppingList: () => void;
   /** 레시피 추가 모달 열기 핸들러 */
   onOpenAddRecipe: () => void;
+  /** 외부 레시피 AI 가져오기 모달 열기 핸들러 */
+  onOpenImportRecipe: () => void;
   /** 백업/복원 모달 열기 핸들러 */
   onOpenBackupRestore: () => void;
   /** 타이머 위젯 토글 핸들러 */
   onToggleTimer: () => void;
   /** 타이머 활성화 여부 */
   isTimerOpen: boolean;
+  /** PWA 설치 가능 여부 */
+  canInstallPwa?: boolean;
+  /** PWA 설치 핸들러 */
+  onInstallPwa?: () => void;
+  /** 오프라인 여부 */
+  isOffline?: boolean;
 }
 
 /**
@@ -51,9 +62,13 @@ export const Header: React.FC<HeaderProps> = ({
   shoppingCount,
   onOpenShoppingList,
   onOpenAddRecipe,
+  onOpenImportRecipe,
   onOpenBackupRestore,
   onToggleTimer,
   isTimerOpen,
+  canInstallPwa,
+  onInstallPwa,
+  isOffline = false,
 }) => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
@@ -90,6 +105,14 @@ export const Header: React.FC<HeaderProps> = ({
 
   return (
     <header className="sticky top-0 z-40 border-b border-orange-100/80 bg-[#fffaf3]/95 backdrop-blur-xl transition-all">
+      {/* Offline Alert Bar */}
+      {isOffline && (
+        <div className="flex items-center justify-center gap-1.5 bg-amber-500 py-1 px-3 text-center text-xs font-bold text-white shadow-xs">
+          <WifiOff className="h-3.5 w-3.5" />
+          <span>현재 오프라인 상태입니다. 저장된 레시피와 장보기 목록을 계속 이용하실 수 있습니다.</span>
+        </div>
+      )}
+
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
         {/* Brand Logo */}
         <a
@@ -115,11 +138,11 @@ export const Header: React.FC<HeaderProps> = ({
         </a>
 
         {/* Desktop Nav */}
-        <nav className="hidden items-center gap-1.5 md:flex" aria-label="상단 메뉴">
+        <nav className="hidden items-center gap-1 md:flex" aria-label="상단 메뉴">
           <button
             type="button"
             onClick={() => scrollToSection('home')}
-            className="rounded-full px-3.5 py-1.5 text-sm font-semibold text-stone-600 transition hover:bg-orange-100 hover:text-orange-800"
+            className="rounded-full px-3 py-1.5 text-xs font-semibold text-stone-600 transition hover:bg-orange-100 hover:text-orange-800"
           >
             홈
           </button>
@@ -129,7 +152,7 @@ export const Header: React.FC<HeaderProps> = ({
               onSelectCategory('전체');
               scrollToSection('recipes');
             }}
-            className={`rounded-full px-3.5 py-1.5 text-sm font-semibold transition ${
+            className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${
               currentCategory === '전체'
                 ? 'bg-orange-100 font-bold text-orange-800'
                 : 'text-stone-600 hover:bg-orange-100 hover:text-orange-800'
@@ -143,7 +166,7 @@ export const Header: React.FC<HeaderProps> = ({
               onSelectCategory('즐겨찾기');
               scrollToSection('recipes');
             }}
-            className={`flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-sm font-semibold transition ${
+            className={`flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-semibold transition ${
               currentCategory === '즐겨찾기'
                 ? 'bg-amber-100 font-bold text-amber-800'
                 : 'text-stone-600 hover:bg-orange-100 hover:text-orange-800'
@@ -157,26 +180,54 @@ export const Header: React.FC<HeaderProps> = ({
               </span>
             )}
           </button>
+
+          {/* External Recipe Import Button */}
+          <button
+            type="button"
+            onClick={() => {
+              logger.info('Header', '외부 레시피 가져오기 클릭');
+              onOpenImportRecipe();
+            }}
+            className="flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-bold text-orange-700 bg-orange-50 transition hover:bg-orange-100"
+            title="웹페이지 URL이나 텍스트에서 AI로 레시피 가져오기"
+          >
+            <Sparkles className="h-3.5 w-3.5 text-orange-500" />
+            <span>레시피 가져오기</span>
+          </button>
+
           <button
             type="button"
             onClick={onOpenBackupRestore}
-            className="flex items-center gap-1 rounded-full px-3.5 py-1.5 text-sm font-semibold text-stone-600 transition hover:bg-orange-100 hover:text-orange-800"
+            className="flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-semibold text-stone-600 transition hover:bg-orange-100 hover:text-orange-800"
             title="데이터 백업 및 복원"
           >
             <Database className="h-3.5 w-3.5 text-stone-500" />
             <span>백업/복원</span>
           </button>
+
+          {canInstallPwa && onInstallPwa && (
+            <button
+              type="button"
+              onClick={onInstallPwa}
+              className="flex items-center gap-1 rounded-full bg-stone-100 px-3 py-1.5 text-xs font-bold text-stone-700 transition hover:bg-orange-100 hover:text-orange-800"
+              title="홈 화면에 앱 설치하기"
+            >
+              <Download className="h-3.5 w-3.5 text-orange-600" />
+              <span>앱 설치</span>
+            </button>
+          )}
+
           <button
             type="button"
             onClick={() => scrollToSection('about')}
-            className="rounded-full px-3.5 py-1.5 text-sm font-semibold text-stone-600 transition hover:bg-orange-100 hover:text-orange-800"
+            className="rounded-full px-3 py-1.5 text-xs font-semibold text-stone-600 transition hover:bg-orange-100 hover:text-orange-800"
           >
             이용안내
           </button>
         </nav>
 
         {/* Right Action Tools */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 sm:gap-2">
           {/* Kitchen Timer Toggle Button */}
           <button
             type="button"
@@ -276,6 +327,17 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               type="button"
               onClick={() => {
+                onOpenImportRecipe();
+                setIsMobileMenuOpen(false);
+              }}
+              className="flex items-center justify-center gap-1.5 rounded-xl bg-orange-100/80 px-4 py-3 text-center text-sm font-bold text-orange-800 transition hover:bg-orange-200"
+            >
+              <Sparkles className="h-4 w-4 text-orange-600" />
+              <span>레시피 가져오기</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
                 onOpenBackupRestore();
                 setIsMobileMenuOpen(false);
               }}
@@ -284,6 +346,21 @@ export const Header: React.FC<HeaderProps> = ({
               <Database className="h-4 w-4 text-orange-600" />
               <span>백업/복원</span>
             </button>
+
+            {canInstallPwa && onInstallPwa && (
+              <button
+                type="button"
+                onClick={() => {
+                  onInstallPwa();
+                  setIsMobileMenuOpen(false);
+                }}
+                className="flex items-center justify-center gap-1.5 rounded-xl bg-stone-100 px-4 py-3 text-center text-sm font-bold text-stone-700 transition hover:bg-orange-100"
+              >
+                <Download className="h-4 w-4 text-orange-600" />
+                <span>앱 설치하기</span>
+              </button>
+            )}
+
             <button
               type="button"
               onClick={() => scrollToSection('about')}

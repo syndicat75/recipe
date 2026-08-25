@@ -12,7 +12,7 @@ export const APP_CONFIG = {
   appName: '내 입맛 레시피',
   appSubTitle: 'MY FAVORITE RECIPES',
   appDescription: '내가 좋아하는 음식 레시피를 한눈에 찾아보고 계량 조절, 타이머, 조리모드, 장보기 목록을 활용하는 개인 레시피 북',
-  version: '1.1.0',
+  version: '1.2.0',
   storageKeys: {
     /** 통합 레시피 목록 키 */
     allRecipes: 'my_recipe_all_recipes_v2',
@@ -23,6 +23,19 @@ export const APP_CONFIG = {
     recipeNotes: 'my_recipe_user_notes_v1',
     recentRecipes: 'my_recipe_recent_viewed_v1',
     theme: 'my_recipe_theme_preference_v1',
+  },
+  ai: {
+    model: 'gemini-3.7-flash',
+    importEndpoint: '/api/ai/import-recipe',
+    askEndpoint: '/api/ai/ask-recipe',
+    presetQuestions: [
+      { id: 'substitute', label: '🔄 대체 재료 추천', prompt: '이 레시피에서 다른 재료로 대체할 수 있는 것들이 있나요? 알레르기나 냉장고 파먹기용 대체법을 알려주세요.' },
+      { id: 'secret_tip', label: '🍯 셰프의 특급 비법', prompt: '이 요리를 식당처럼 훨씬 맛있고 감칠맛 나게 만드는 셰프의 한 끗 비법 팁을 알려주세요.' },
+      { id: 'side_dish', label: '🥗 어울리는 곁들임/반찬', prompt: '이 요리와 함께 상차림하면 궁합이 좋은 국/찌개나 사이드 반찬을 추천해주세요.' },
+      { id: 'kid_friendly', label: '👶 덜 맵게/아이 맞춤 조리법', prompt: '아이들이나 매운 것을 못 먹는 사람이 먹기 좋게 간이나 맵기를 조절하는 팁을 알려주세요.' },
+      { id: 'quick_cook', label: '⚡ 조리 시간 단축 꿀팁', prompt: '바쁜 날 더 빠르게 만들 수 있는 시간 단축 팁이나 전자레인지/에어프라이어 활용법이 있나요?' },
+      { id: 'storage', label: '🧊 보관 및 데우기 방법', prompt: '남은 음식을 가장 맛있게 보관하고 다시 데워먹는 최적의 방법을 알려주세요.' },
+    ],
   },
   maxRecentRecipes: 5,
   defaultPortionMultiplier: 1,
