@@ -38,11 +38,23 @@ interface FirebaseConfig {
 
 /**
  * 환경변수 및 기본 설정 병합
+ * Vercel 배포 도메인(recipe-mu-ten.vercel.app)에서는 /__/auth/* 프록시를 통해
+ * 서드파티 스토리지 제한(Third-party Storage Partitioning) 없이 First-Party로 안전하게 인증을 처리합니다.
  */
+const resolveAuthDomain = (): string => {
+  if (import.meta.env.VITE_FIREBASE_AUTH_DOMAIN) {
+    return import.meta.env.VITE_FIREBASE_AUTH_DOMAIN;
+  }
+  if (typeof window !== 'undefined' && window.location.hostname === 'recipe-mu-ten.vercel.app') {
+    return 'recipe-mu-ten.vercel.app';
+  }
+  return firebaseAppletConfig.authDomain || 'synd-e4600.firebaseapp.com';
+};
+
 const firebaseConfig: FirebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY || firebaseAppletConfig.apiKey || '',
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || firebaseAppletConfig.authDomain || '',
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || firebaseAppletConfig.projectId || '',
+  authDomain: resolveAuthDomain(),
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || firebaseAppletConfig.projectId || 'synd-e4600',
   storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || firebaseAppletConfig.storageBucket || '',
   messagingSenderId:
     import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || firebaseAppletConfig.messagingSenderId || '',

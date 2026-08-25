@@ -86,6 +86,7 @@ export default function App(): React.JSX.Element {
   const {
     user,
     isLoading: isAuthLoading,
+    isLoggingIn,
     syncStatus,
     setSyncStatus,
     loginWithGoogle,
@@ -864,11 +865,24 @@ export default function App(): React.JSX.Element {
   }, [user, showToast]);
 
   /**
+   * Google 로그인 시작 핸들러
+   */
+  const handleGoogleLogin = useCallback(async () => {
+    logger.info('App.handleGoogleLogin', '사용자 Google 로그인 버튼 클릭');
+    const result = await loginWithGoogle((errorMessage: string) => {
+      showToast(errorMessage, 'warning');
+    });
+    if (result) {
+      showToast(`👋 ${result.displayName || result.email}님, 환영합니다!`, 'success');
+    }
+  }, [loginWithGoogle, showToast]);
+
+  /**
    * 클라우드 동기화 수동 관리 모달 열기
    */
   const handleManualOpenCloudSyncModal = useCallback(async () => {
     if (!user) {
-      loginWithGoogle();
+      handleGoogleLogin();
       return;
     }
     const currentLocal = loadAllRecipes();
@@ -1079,7 +1093,8 @@ export default function App(): React.JSX.Element {
         isOffline={!isOnline || isOffline}
         user={user}
         syncStatus={syncStatus}
-        onLogin={loginWithGoogle}
+        isLoggingIn={isLoggingIn}
+        onLogin={handleGoogleLogin}
         onLogout={() => {
           logout();
           showToast('로그아웃되었습니다. 로컬 모드로 전환됩니다.', 'info');
