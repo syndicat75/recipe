@@ -1,11 +1,11 @@
 /**
  * @file api/ai/ask-recipe.ts
  * @description Vercel Serverless Function - AI 요리사 레시피 Q&A 상담 API.
- * api/_lib/geminiService의 정적 import를 사용하여 Vercel 번들러가 의존성을 안정적으로 패키징합니다.
+ * lib/geminiService의 정적 import를 사용하여 Vercel 번들러가 의존성을 안정적으로 패키징합니다.
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { askChefAboutRecipe } from '../_lib/geminiService';
+import { askChefAboutRecipe } from '../../lib/geminiService';
 
 /**
  * Vercel Serverless Function 핸들러
@@ -15,7 +15,7 @@ import { askChefAboutRecipe } from '../_lib/geminiService';
  */
 export default async function handler(req: VercelRequest, res: VercelResponse): Promise<void> {
   // 항상 JSON 응답 헤더 설정
-  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
 
   if (req.method !== 'POST') {
     res.status(405).json({

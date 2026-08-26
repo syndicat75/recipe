@@ -10,7 +10,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
  * GET /api/health
  */
 export default function handler(req: VercelRequest, res: VercelResponse): void {
-  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.status(200).json({
     status: 'ok',
     timestamp: new Date().toISOString(),

@@ -2,7 +2,7 @@
  * @file server.ts
  * @description Express 및 Vite 통합 풀스택 서버.
  * Gemini API를 활용한 외부 레시피 분석, 사진 OCR, Q&A 및 추천 엔드포인트 제공.
- * 핵심 비즈니스 로직은 api/_lib/geminiService.ts를 공유합니다.
+ * 핵심 비즈니스 로직은 lib/geminiService.ts를 공유합니다.
  */
 
 import express, { Request, Response } from 'express';
@@ -15,7 +15,7 @@ import {
   askChefAboutRecipe,
   recommendMenuFromCandidates,
   getGeminiClient,
-} from './api/_lib/geminiService';
+} from './lib/geminiService';
 
 // 환경 변수 로드 (로컬 개발 환경)
 dotenv.config();

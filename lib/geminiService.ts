@@ -1,9 +1,9 @@
 /**
- * @file api/_lib/geminiService.ts
+ * @file lib/geminiService.ts
  * @description Gemini 3.7 Flash 모델을 활용한 레시피 AI 서비스 핵심 비즈니스 로직.
  * 웹 URL/텍스트 분석, 요리책/메모 사진 멀티모달 OCR, AI 요리사 Q&A, 맞춤 메뉴 추천 기능을 제공합니다.
  * Vercel Serverless Functions(api/ai/*) 및 로컬 Express 서버(server.ts)에서 공통으로 사용됩니다.
- * Vercel 런타임 최적화를 위해 dotenv는 제거하고 process.env.GEMINI_API_KEY를 직접 참조합니다.
+ * Vercel 런타임 최적화를 위해 dotenv는 사용하지 않으며 process.env.GEMINI_API_KEY를 직접 참조합니다.
  */
 
 import { GoogleGenAI, Type } from '@google/genai';

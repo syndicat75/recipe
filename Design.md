@@ -16,7 +16,7 @@
 ## 2. 시스템 아키텍처 (System Architecture)
 
 ### 2.1 풀스택 구성 (Express + Vercel Serverless Functions + React 19 Vite)
-- **공통 AI 비즈니스 서비스 (`api/_lib/geminiService.ts`)**:
+- **공통 AI 비즈니스 서비스 (`lib/geminiService.ts`)**:
   - Google Gen AI `@google/genai` (Gemini 3.7 Flash) SDK 연동.
   - Vercel Serverless Function 런타임 표준에 맞춰 `process.env.GEMINI_API_KEY`를 `getGeminiClient()` 함수 내에서 지연(Lazy) 초기화하여 모듈 로딩 시점의 환경 변수 미인식 크래시 원천 방지.
   - `dotenv`를 라이브러리 내부에서 호출하지 않아 서버리스 런타임 호환성 극대화.
@@ -27,22 +27,22 @@
   - `POST /api/ai/import-recipe`: 웹 URL 또는 텍스트 기반 레시피 구조화 추출 (`api/ai/import-recipe.ts`)
   - `POST /api/ai/ask-recipe`: 레시피 컨텍스트 기반 AI 요리 상담 (`api/ai/ask-recipe.ts`)
   - `POST /api/ai/recommend-menu`: 자연어 기분/상황 기반 내 레시피 풀 매칭 추천 (`api/ai/recommend-menu.ts`)
-  - `GET /api/ai/diagnostic`: Gemini SDK 및 환경변수 설정 진단 엔드포인트 (`api/ai/diagnostic.ts`)
+  - `GET /api/ai/diagnostic`: Gemini SDK 및 환경변수 설정 진단 엔드포인트 (`api/ai/diagnostic.ts` - 공통 geminiService 의존성 없이 독립 구동)
   - `GET /api/health`: 서비스 상태 진단 (`api/health.ts` - Gemini 모듈 미참조로 독립 진단 가능)
-  - **정적 Import 및 안정적 번들링**: 모든 `api/ai/*.ts`에서 `api/_lib/geminiService.ts`를 상단에서 정적으로 `import`하여 Vercel 배포 시 의존성이 완벽하게 번들링되도록 보장.
+  - **정적 Import 및 안정적 번들링**: 모든 `api/ai/*.ts`에서 `../../lib/geminiService`를 상단에서 정적으로 `import`하여 Vercel 배포 시 의존성이 완벽하게 번들링되도록 보장.
   - `vercel.json`의 `/((?!api/.*).*)` 규칙을 통해 `/api/*` 요청이 SPA `index.html`로 폴백되지 않고 실제 서버리스 함수로 라우팅됨.
 - **로컬/독립 백엔드 (`server.ts`)**:
-  - 개발 모드(`npm run dev`)에서 `dotenv.config()`를 선행 실행하고 동일한 `api/_lib/geminiService.ts`를 공유하여 로컬과 Vercel Production 간 100% 일치된 로직 구동.
+  - 개발 모드(`npm run dev`)에서 `dotenv.config()`를 선행 실행하고 동일한 `lib/geminiService.ts`를 공유하여 로컬과 Vercel Production 간 100% 일치된 로직 구동.
 - **클라이언트 AI 호출 안전 계층 (`src/utils/aiApiHelper.ts`)**:
   - `callAiApi<T>`: 페이로드 용량 사전 검증(최대 4.0MB), `response.text()` 선행 수신, `Content-Type: application/json` 검증, 방어적 JSON 파싱 및 오류 발생 시 `console.error`에 `status, error, details` 상세 출력.
 
 ### 2.2 디렉토리 및 파일 구조
 ```
+├── lib/
+│   └── geminiService.ts            # Gemini 3.7 Flash 핵심 AI 공통 로직 (Lazy Client Init)
 ├── api/                            # Vercel Serverless Functions
-│   ├── _lib/
-│   │   └── geminiService.ts        # Gemini 3.7 Flash 핵심 AI 공통 로직 (Lazy Client Init)
 │   ├── ai/
-│   │   ├── diagnostic.ts           # AI 환경변수 및 모듈 진단 함수
+│   │   ├── diagnostic.ts           # 독립형 AI 환경변수 및 SDK 로딩 진단 함수
 │   │   ├── import-recipe-image.ts  # 사진 OCR 분석 서버리스 함수
 │   │   ├── import-recipe.ts        # URL/텍스트 분석 서버리스 함수
 │   │   ├── ask-recipe.ts           # AI 요리사 Q&A 서버리스 함수
