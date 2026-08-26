@@ -1,11 +1,10 @@
 /**
  * @file api/ai/recommend-menu.ts
  * @description Vercel Serverless Function - 오늘 뭐 먹지? AI 자연어 맞춤 추천 API.
- * lib/geminiService의 정적 import를 사용하여 Vercel 번들러가 의존성을 안정적으로 패키징합니다.
+ * handler 내부 dynamic import를 적용하여 공통 모듈 로딩 오류 발생 시에도 JSON 형태로 안전하게 반환합니다.
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { recommendMenuFromCandidates } from '../../lib/geminiService';
 
 /**
  * Vercel Serverless Function 핸들러
@@ -26,6 +25,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   }
 
   try {
+    const { recommendMenuFromCandidates } = await import('../../lib/geminiService');
+
     let body = req.body;
     if (typeof body === 'string') {
       try {
@@ -69,11 +70,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
 
     res.status(200).json(result);
   } catch (error) {
-    console.error('AI function runtime error in /api/ai/recommend-menu:', error);
+    console.error('Failed loading/executing geminiService in /api/ai/recommend-menu:', error);
     res.status(500).json({
       success: false,
       error: 'AI 서버 실행 중 오류가 발생했습니다.',
-      details: error instanceof Error ? error.message : String(error),
+      details: error instanceof Error ? error.stack || error.message : String(error),
     });
   }
 }
