@@ -16,9 +16,10 @@
 ## 2. 시스템 아키텍처 (System Architecture)
 
 ### 2.1 풀스택 구성 (Express + Vercel Serverless Functions + React 19 Vite)
-- **공통 AI 비즈니스 서비스 (`server/geminiService.ts`)**:
+- **공통 AI 비즈니스 서비스 (`api/_lib/geminiService.ts`)**:
   - Google Gen AI `@google/genai` (Gemini 3.7 Flash) SDK 연동.
-  - 서버 측 전용 보안 환경변수 `GEMINI_API_KEY`를 안전하게 로드.
+  - Vercel Serverless Function 런타임 표준에 맞춰 `process.env.GEMINI_API_KEY`를 `getGeminiClient()` 함수 내에서 지연(Lazy) 초기화하여 모듈 로딩 시점의 환경 변수 미인식 크래시 원천 방지.
+  - `dotenv`를 라이브러리 내부에서 호출하지 않아 서버리스 런타임 호환성 극대화.
   - 모든 예외 경로에서 100% 표준 JSON 응답 및 방어적 파싱 보장 (`safeParseGeminiJson`).
   - 음식 완성 사진 등 레시피 텍스트가 없는 이미지 판독 시 `isRecipeFound` 플래그 및 안내 메시지 처리.
 - **Vercel Serverless Functions (`api/`)**:
@@ -26,27 +27,28 @@
   - `POST /api/ai/import-recipe`: 웹 URL 또는 텍스트 기반 레시피 구조화 추출 (`api/ai/import-recipe.ts`)
   - `POST /api/ai/ask-recipe`: 레시피 컨텍스트 기반 AI 요리 상담 (`api/ai/ask-recipe.ts`)
   - `POST /api/ai/recommend-menu`: 자연어 기분/상황 기반 내 레시피 풀 매칭 추천 (`api/ai/recommend-menu.ts`)
+  - `GET /api/ai/diagnostic`: Gemini SDK 및 환경변수 설정 진단 엔드포인트 (`api/ai/diagnostic.ts`)
   - `GET /api/health`: 서비스 상태 진단 (`api/health.ts` - Gemini 모듈 미참조로 독립 진단 가능)
-  - **Dynamic Import 패턴**: Vercel 런타임 모듈 초기화 단계에서 발생할 수 있는 `@google/genai`, `dotenv`, 경로 해석 오류가 Vercel generic 500 HTML 에러를 유발하지 않도록, 모든 `api/ai/*.ts` 핸들러 내부 `try/catch` 블록에서 `await import('../../server/geminiService')`를 동적으로 호출하여 100% JSON 에러 응답을 보장.
+  - **정적 Import 및 안정적 번들링**: 모든 `api/ai/*.ts`에서 `api/_lib/geminiService.ts`를 상단에서 정적으로 `import`하여 Vercel 배포 시 의존성이 완벽하게 번들링되도록 보장.
   - `vercel.json`의 `/((?!api/.*).*)` 규칙을 통해 `/api/*` 요청이 SPA `index.html`로 폴백되지 않고 실제 서버리스 함수로 라우팅됨.
 - **로컬/독립 백엔드 (`server.ts`)**:
-  - 개발 모드(`npm run dev`)에서 Vite 미들웨어(`middlewareMode: true`)와 통합 구동.
-  - 동일한 `server/geminiService.ts`를 공유하여 로컬과 Vercel Production 간 100% 동일한 동작 보장.
+  - 개발 모드(`npm run dev`)에서 `dotenv.config()`를 선행 실행하고 동일한 `api/_lib/geminiService.ts`를 공유하여 로컬과 Vercel Production 간 100% 일치된 로직 구동.
 - **클라이언트 AI 호출 안전 계층 (`src/utils/aiApiHelper.ts`)**:
-  - `callAiApi<T>`: 페이로드 용량 사전 검증(최대 4.0MB), `response.text()` 선행 수신, `Content-Type: application/json` 검증, 방어적 JSON 파싱으로 `Unexpected end of JSON input` 및 `Unexpected token <` 원천 차단.
+  - `callAiApi<T>`: 페이로드 용량 사전 검증(최대 4.0MB), `response.text()` 선행 수신, `Content-Type: application/json` 검증, 방어적 JSON 파싱 및 오류 발생 시 `console.error`에 `status, error, details` 상세 출력.
 
 ### 2.2 디렉토리 및 파일 구조
 ```
 ├── api/                            # Vercel Serverless Functions
+│   ├── _lib/
+│   │   └── geminiService.ts        # Gemini 3.7 Flash 핵심 AI 공통 로직 (Lazy Client Init)
 │   ├── ai/
+│   │   ├── diagnostic.ts           # AI 환경변수 및 모듈 진단 함수
 │   │   ├── import-recipe-image.ts  # 사진 OCR 분석 서버리스 함수
 │   │   ├── import-recipe.ts        # URL/텍스트 분석 서버리스 함수
 │   │   ├── ask-recipe.ts           # AI 요리사 Q&A 서버리스 함수
 │   │   └── recommend-menu.ts       # AI 오늘뭐먹지 추천 서버리스 함수
 │   └── health.ts                   # 헬스체크 서버리스 함수
 ├── server.ts                       # 로컬 Express 개발 및 번들 서버
-├── server/
-│   └── geminiService.ts            # Gemini 3.7 Flash 핵심 AI 로직
 ├── public/
 │   ├── manifest.webmanifest        # PWA 매니페스트 (테마/아이콘/오프라인)
 │   ├── sw.js                       # PWA 오프라인 Service Worker (Cache v2.1)

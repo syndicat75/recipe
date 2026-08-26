@@ -98,10 +98,19 @@ export async function callAiApi<T = unknown>(
     throw new Error('AI 서버 응답 형식이 올바르지 않습니다.');
   }
 
-  // 6. 성공 여부 확인
+  // 6. 성공 여부 확인 및 콘솔 디버깅 로깅
   if (!response.ok || !data.success) {
+    console.error(
+      'AI API server error:',
+      response.status,
+      data.error,
+      data.details
+    );
     logger.error('aiApiHelper.callAiApi', `API 실패 응답 (${response.status}): ${data.error || '알 수 없는 오류'}`);
-    throw new Error(data.error || `요청 처리에 실패했습니다. (HTTP ${response.status})`);
+
+    throw new Error(
+      data.error || `요청 처리에 실패했습니다. (HTTP ${response.status})`
+    );
   }
 
   logger.info('aiApiHelper.callAiApi', `AI API 호출 성공: ${endpoint}`);

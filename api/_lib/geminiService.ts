@@ -1,21 +1,19 @@
 /**
- * @file server/geminiService.ts
+ * @file api/_lib/geminiService.ts
  * @description Gemini 3.7 Flash 모델을 활용한 레시피 AI 서비스 핵심 비즈니스 로직.
  * 웹 URL/텍스트 분석, 요리책/메모 사진 멀티모달 OCR, AI 요리사 Q&A, 맞춤 메뉴 추천 기능을 제공합니다.
- * Express server.ts 및 Vercel Serverless Functions(api/ai/*)에서 공통으로 사용됩니다.
+ * Vercel Serverless Functions(api/ai/*) 및 로컬 Express 서버(server.ts)에서 공통으로 사용됩니다.
+ * Vercel 런타임 최적화를 위해 dotenv는 제거하고 process.env.GEMINI_API_KEY를 직접 참조합니다.
  */
 
 import { GoogleGenAI, Type } from '@google/genai';
-import dotenv from 'dotenv';
-
-// 환경 변수 로드
-dotenv.config();
 
 /**
- * Gemini 클라이언트 싱글톤 인스턴스 취득 함수
+ * Gemini 클라이언트 인스턴스 지연(Lazy) 생성 함수
+ * Top-level에서 생성하지 않고 API 호출 시점에 생성하여 불필요한 초기화 에러를 방지합니다.
  * @returns GoogleGenAI 인스턴스
  */
-function getGeminiClient(): GoogleGenAI {
+export function getGeminiClient(): GoogleGenAI {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey || !apiKey.trim()) {
     throw new Error('GEMINI_API_KEY_NOT_CONFIGURED');
@@ -23,11 +21,6 @@ function getGeminiClient(): GoogleGenAI {
 
   return new GoogleGenAI({
     apiKey: apiKey.trim(),
-    httpOptions: {
-      headers: {
-        'User-Agent': 'aistudio-build',
-      },
-    },
   });
 }
 
@@ -172,7 +165,7 @@ ${sourceContent}
     if (error instanceof Error && error.message === 'GEMINI_API_KEY_NOT_CONFIGURED') {
       return {
         success: false,
-        error: 'AI 서버 설정이 완료되지 않았습니다.',
+        error: 'AI 서버 설정이 완료되지 않았습니다. GEMINI_API_KEY를 확인해주세요.',
       };
     }
     return {
@@ -325,7 +318,7 @@ export async function importRecipeFromImage(params: {
     if (error instanceof Error && error.message === 'GEMINI_API_KEY_NOT_CONFIGURED') {
       return {
         success: false,
-        error: 'AI 서버 설정이 완료되지 않았습니다.',
+        error: 'AI 서버 설정이 완료되지 않았습니다. GEMINI_API_KEY를 확인해주세요.',
       };
     }
     return {
@@ -425,7 +418,7 @@ ${recipe.userNotes ? `- 사용자의 나만의 메모: ${recipe.userNotes}` : ''
     if (error instanceof Error && error.message === 'GEMINI_API_KEY_NOT_CONFIGURED') {
       return {
         success: false,
-        error: 'AI 서버 설정이 완료되지 않았습니다.',
+        error: 'AI 서버 설정이 완료되지 않았습니다. GEMINI_API_KEY를 확인해주세요.',
       };
     }
     return {
@@ -516,7 +509,7 @@ ${candidateRecipes.map((r) => `- [ID: ${r.id}] ${r.name} (${r.category}) / 주�
     if (error instanceof Error && error.message === 'GEMINI_API_KEY_NOT_CONFIGURED') {
       return {
         success: false,
-        error: 'AI 서버 설정이 완료되지 않았습니다.',
+        error: 'AI 서버 설정이 완료되지 않았습니다. GEMINI_API_KEY를 확인해주세요.',
       };
     }
     return {

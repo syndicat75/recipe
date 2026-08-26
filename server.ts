@@ -2,7 +2,7 @@
  * @file server.ts
  * @description Express 및 Vite 통합 풀스택 서버.
  * Gemini API를 활용한 외부 레시피 분석, 사진 OCR, Q&A 및 추천 엔드포인트 제공.
- * 핵심 비즈니스 로직은 server/geminiService.ts를 공유합니다.
+ * 핵심 비즈니스 로직은 api/_lib/geminiService.ts를 공유합니다.
  */
 
 import express, { Request, Response } from 'express';
@@ -14,9 +14,10 @@ import {
   importRecipeFromImage,
   askChefAboutRecipe,
   recommendMenuFromCandidates,
-} from './server/geminiService';
+  getGeminiClient,
+} from './api/_lib/geminiService';
 
-// 환경 변수 로드
+// 환경 변수 로드 (로컬 개발 환경)
 dotenv.config();
 
 /**
@@ -36,6 +37,42 @@ async function startServer(): Promise<void> {
   app.get('/api/health', (_req: Request, res: Response) => {
     res.setHeader('Content-Type', 'application/json');
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  });
+
+  /**
+   * AI 진단 엔드포인트 (로컬 개발 서버용)
+   */
+  app.get('/api/ai/diagnostic', (_req: Request, res: Response) => {
+    res.setHeader('Content-Type', 'application/json');
+    const apiKey = process.env.GEMINI_API_KEY;
+    const isApiKeyConfigured = Boolean(apiKey && apiKey.trim().length > 0);
+    let geminiModuleLoaded = false;
+    let clientInitializationSuccess = false;
+    let errorDetail: string | undefined;
+
+    try {
+      if (isApiKeyConfigured) {
+        const client = getGeminiClient();
+        if (client) {
+          clientInitializationSuccess = true;
+        }
+      }
+      geminiModuleLoaded = true;
+    } catch (sdkError) {
+      console.error('Gemini SDK diagnostic error in server.ts:', sdkError);
+      errorDetail = sdkError instanceof Error ? sdkError.message : String(sdkError);
+    }
+
+    res.status(200).json({
+      success: true,
+      environment: 'express-local',
+      geminiApiKeyConfigured: isApiKeyConfigured,
+      geminiModuleLoaded,
+      clientInitializationSuccess,
+      model: 'gemini-3.7-flash',
+      timestamp: new Date().toISOString(),
+      ...(errorDetail ? { details: errorDetail } : {}),
+    });
   });
 
   /**
