@@ -70,7 +70,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
 
     res.status(200).json(result);
   } catch (error) {
-    console.error('Failed loading/executing geminiService in /api/ai/recommend-menu:', error);
+    console.error('[recommend-menu] module/runtime error:', error);
+
     res.status(500).json({
       success: false,
       error: 'AI 서버 실행 중 오류가 발생했습니다.',

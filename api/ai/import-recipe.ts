@@ -50,7 +50,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       return;
     }
 
-    const result = await importRecipeFromTextOrUrl({ url, text });
+    const result = await importRecipeFromTextOrUrl({
+      url,
+      text,
+    });
 
     if (!result.success) {
       res.status(500).json(result);
@@ -59,7 +62,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
 
     res.status(200).json(result);
   } catch (error) {
-    console.error('Failed loading/executing geminiService in /api/ai/import-recipe:', error);
+    console.error('[import-recipe] module/runtime error:', error);
+
     res.status(500).json({
       success: false,
       error: 'AI 서버 실행 중 오류가 발생했습니다.',

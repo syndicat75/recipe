@@ -53,7 +53,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       return;
     }
 
-    const result = await importRecipeFromImage({ imageBase64, mimeType });
+    const result = await importRecipeFromImage({
+      imageBase64,
+      mimeType,
+    });
 
     if (!result.success) {
       res.status(500).json(result);
@@ -62,7 +65,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
 
     res.status(200).json(result);
   } catch (error) {
-    console.error('Failed loading/executing geminiService in /api/ai/import-recipe-image:', error);
+    console.error('[import-recipe-image] module/runtime error:', error);
+
     res.status(500).json({
       success: false,
       error: 'AI 서버 실행 중 오류가 발생했습니다.',
