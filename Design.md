@@ -15,33 +15,51 @@
 
 ## 2. 시스템 아키텍처 (System Architecture)
 
-### 2.1 풀스택 구성 (Full-Stack Express + React 19 Vite)
-- **Backend (`server.ts`)**:
-  - Express 웹 서버와 Google Gen AI `@google/genai` (Gemini 3.7 Flash) SDK 연동.
-  - 보안 환경변수 `GEMINI_API_KEY`를 서버 측에서만 안전하게 관리.
-  - API 엔드포인트:
-    - `POST /api/ai/ask-recipe`: 레시피 컨텍스트 기반 AI 요리 상담
-    - `POST /api/ai/import-recipe`: 웹 URL 또는 텍스트 기반 레시피 구조화 추출
-    - `POST /api/ai/import-recipe-image`: 요리책·메모 사진 기반 멀티모달 OCR 레시피 추출
-    - `POST /api/ai/recommend-menu`: 자연어 기분/상황 기반 내 레시피 풀 매칭 추천
-  - 개발 환경: Vite 미들웨어 (`middlewareMode: true`)
-  - 프로덕션: `dist/` 정적 자산 서빙 및 CommonJS 빌드 번들 (`dist/server.cjs`)
+### 2.1 풀스택 구성 (Express + Vercel Serverless Functions + React 19 Vite)
+- **공통 AI 비즈니스 서비스 (`server/geminiService.ts`)**:
+  - Google Gen AI `@google/genai` (Gemini 3.7 Flash) SDK 연동.
+  - 서버 측 전용 보안 환경변수 `GEMINI_API_KEY`를 안전하게 로드.
+  - 모든 예외 경로에서 100% 표준 JSON 응답 및 방어적 파싱 보장 (`safeParseGeminiJson`).
+  - 음식 완성 사진 등 레시피 텍스트가 없는 이미지 판독 시 `isRecipeFound` 플래그 및 안내 메시지 처리.
+- **Vercel Serverless Functions (`api/`)**:
+  - `POST /api/ai/import-recipe-image`: 요리책·메모 사진 기반 멀티모달 OCR 레시피 추출 (`api/ai/import-recipe-image.ts`)
+  - `POST /api/ai/import-recipe`: 웹 URL 또는 텍스트 기반 레시피 구조화 추출 (`api/ai/import-recipe.ts`)
+  - `POST /api/ai/ask-recipe`: 레시피 컨텍스트 기반 AI 요리 상담 (`api/ai/ask-recipe.ts`)
+  - `POST /api/ai/recommend-menu`: 자연어 기분/상황 기반 내 레시피 풀 매칭 추천 (`api/ai/recommend-menu.ts`)
+  - `GET /api/health`: 서비스 상태 진단 (`api/health.ts`)
+  - `vercel.json`의 `/((?!api/.*).*)` 규칙을 통해 `/api/*` 요청이 SPA `index.html`로 폴백되지 않고 실제 서버리스 함수로 라우팅됨.
+- **로컬/독립 백엔드 (`server.ts`)**:
+  - 개발 모드(`npm run dev`)에서 Vite 미들웨어(`middlewareMode: true`)와 통합 구동.
+  - 동일한 `server/geminiService.ts`를 공유하여 로컬과 Vercel Production 간 100% 동일한 동작 보장.
+- **클라이언트 AI 호출 안전 계층 (`src/utils/aiApiHelper.ts`)**:
+  - `callAiApi<T>`: 페이로드 용량 사전 검증(최대 4.0MB), `response.text()` 선행 수신, `Content-Type: application/json` 검증, 방어적 JSON 파싱으로 `Unexpected end of JSON input` 및 `Unexpected token <` 원천 차단.
 
 ### 2.2 디렉토리 및 파일 구조
 ```
-├── server.ts                       # Express 백엔드 서버 & Gemini AI 엔드포인트
+├── api/                            # Vercel Serverless Functions
+│   ├── ai/
+│   │   ├── import-recipe-image.ts  # 사진 OCR 분석 서버리스 함수
+│   │   ├── import-recipe.ts        # URL/텍스트 분석 서버리스 함수
+│   │   ├── ask-recipe.ts           # AI 요리사 Q&A 서버리스 함수
+│   │   └── recommend-menu.ts       # AI 오늘뭐먹지 추천 서버리스 함수
+│   └── health.ts                   # 헬스체크 서버리스 함수
+├── server.ts                       # 로컬 Express 개발 및 번들 서버
+├── server/
+│   └── geminiService.ts            # Gemini 3.7 Flash 핵심 AI 로직
 ├── public/
 │   ├── manifest.webmanifest        # PWA 매니페스트 (테마/아이콘/오프라인)
-│   ├── sw.js                       # PWA 오프라인 Service Worker (Cache v2.0)
+│   ├── sw.js                       # PWA 오프라인 Service Worker (Cache v2.1)
 │   └── favicon.svg                 # 앱 파비콘
 ├── src/
 │   ├── types/
-│   │   └── recipe.ts               # 레시피, 식단표, 타이머, 가족 공간 등 타입 정의
+│   │   ├── recipe.ts               # 레시피, 식단표, 타이머, 가족 공간 등 타입 정의
+│   │   └── firebase.ts             # Firebase Auth 및 사용자 타입 정의
 │   ├── config/
 │   │   └── appConfig.ts            # 카테고리, 모델명, AI 엔드포인트, 스토리지 키
 │   ├── data/
 │   │   └── initialRecipes.ts       # 기본 26개 시드 레시피 데이터셋
 │   ├── utils/
+│   │   ├── aiApiHelper.ts          # 안전한 AI API 호출 및 JSON 파싱 헬퍼
 │   │   ├── logger.ts               # 구조화된 디버그/인포 로거
 │   │   ├── scaler.ts               # 인분 수 수학적 분량/분수 정밀 계산 엔진
 │   │   └── storage.ts              # LocalStorage 영속화 및 마이그레이션 모듈

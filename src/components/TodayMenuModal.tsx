@@ -24,6 +24,7 @@ import { Recipe, FilterCategory, RecipeCategory } from '../types/recipe';
 import { CATEGORY_CONFIG, CATEGORY_LIST, APP_CONFIG } from '../config/appConfig';
 import { logger } from '../utils/logger';
 import { getRecentRecommendations, saveRecentRecommendations } from '../utils/storage';
+import { callAiApi } from '../utils/aiApiHelper';
 
 interface TodayMenuModalProps {
   isOpen: boolean;
@@ -204,35 +205,30 @@ export const TodayMenuModal: React.FC<TodayMenuModalProps> = ({
         ingredients: r.ingredients,
       }));
 
-      const res = await fetch(APP_CONFIG.ai.recommendEndpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userPrompt: aiPrompt.trim(),
-          candidateRecipes: candidateSummary,
-        }),
+      interface RecommendMenuResponse {
+        recommendedRecipeId?: number | null;
+        reason?: string;
+      }
+
+      const data = await callAiApi<RecommendMenuResponse>(APP_CONFIG.ai.recommendEndpoint, {
+        userPrompt: aiPrompt.trim(),
+        candidateRecipes: candidateSummary,
       });
 
-      if (!res.ok) {
-        throw new Error('AI 추천 서버 응답 실패');
-      }
-
-      const data = await res.json();
-      if (data.success) {
-        if (data.recommendedRecipeId) {
-          const matched = allRecipes.find((r) => r.id === data.recommendedRecipeId);
-          setAiResultRecipe(matched || null);
-        } else {
-          setAiResultRecipe(null);
-        }
-        setAiReason(data.reason || '추천 메뉴를 선정했습니다.');
-        logger.info('TodayMenuModal.handleAiRecommend', `AI 추천 완료: ID ${data.recommendedRecipeId}`);
+      if (data.recommendedRecipeId) {
+        const matched = allRecipes.find((r) => r.id === data.recommendedRecipeId);
+        setAiResultRecipe(matched || null);
       } else {
-        throw new Error(data.error || '추천 생성 실패');
+        setAiResultRecipe(null);
       }
+      setAiReason(data.reason || '추천 메뉴를 선정했습니다.');
+      logger.info('TodayMenuModal.handleAiRecommend', `AI 추천 완료: ID ${data.recommendedRecipeId}`);
     } catch (error) {
       logger.error('TodayMenuModal.handleAiRecommend', 'AI 추천 중 오류', error);
-      showToast('AI 추천 중 문제가 발생했습니다. 일반 랜덤 추천을 이용해주세요.', 'error');
+      showToast(
+        error instanceof Error ? error.message : 'AI 추천 중 문제가 발생했습니다. 일반 랜덤 추천을 이용해주세요.',
+        'error'
+      );
     } finally {
       setAiLoading(false);
     }

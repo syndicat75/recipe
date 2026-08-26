@@ -28,6 +28,7 @@ import {
 import { APP_CONFIG, CATEGORY_CONFIG, CATEGORY_LIST } from '../config/appConfig';
 import { Recipe, RecipeCategory } from '../types/recipe';
 import { logger } from '../utils/logger';
+import { callAiApi } from '../utils/aiApiHelper';
 
 interface ImportRecipeModalProps {
   /** 모달 열림 여부 */
@@ -45,13 +46,14 @@ interface ImportRecipeModalProps {
 type ImportTab = 'url' | 'text' | 'image';
 
 /**
- * 브라우저 캔버스를 활용해 이미지 파일을 최대 해상도와 JPEG 압축 품질로 리사이징하여 Base64로 변환합니다.
+ * 브라우저 캔버스를 활용해 이미지 파일을 적정 해상도(최대 1400px)와 JPEG 압축 품질(0.80)로 리사이징하여 Base64로 변환합니다.
+ * OCR 텍스트 가독성을 최상으로 유지하면서 Vercel Serverless 요청 페이로드를 안전한 크기(~200KB-800KB)로 최적화합니다.
  * @param file 이미지 파일
- * @param maxWidth 최대 가로/세로 픽셀 (기본 1600)
- * @param quality JPEG 품질 (0.1 ~ 1.0, 기본 0.85)
+ * @param maxWidth 최대 가로/세로 픽셀 (기본 1400)
+ * @param quality JPEG 품질 (0.1 ~ 1.0, 기본 0.80)
  * @returns Base64 Data URL 문자열
  */
-function compressImageFile(file: File, maxWidth: number = 1600, quality: number = 0.85): Promise<string> {
+function compressImageFile(file: File, maxWidth: number = 1400, quality: number = 0.80): Promise<string> {
   logger.info('ImportRecipeModal.compressImageFile', `이미지 압축 시작: ${file.name} (${(file.size / 1024).toFixed(1)}KB)`);
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -194,24 +196,32 @@ export const ImportRecipeModal: React.FC<ImportRecipeModalProps> = ({
         bodyData = { imageBase64: imagePreview, mimeType: 'image/jpeg' };
       }
 
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(bodyData),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok || !data.success) {
-        throw new Error(data.error || '레시피 분석에 실패했습니다.');
+      interface RecipeAiResponsePayload {
+        name?: string;
+        category?: string;
+        icon?: string;
+        baseServings?: number;
+        ingredients?: string;
+        method?: string;
+        cookingTimeMinutes?: number;
+        difficulty?: '쉬움' | '보통' | '어려움';
+        tip?: string;
+        tips?: string;
+        lowConfidenceFields?: string[];
       }
 
-      const resData = activeTab === 'image' ? data.recipe : data.data;
+      const data = await callAiApi<RecipeAiResponsePayload>(endpoint, bodyData, 4.0);
+
+      const resData = (activeTab === 'image' ? data.recipe : data.data) as RecipeAiResponsePayload | undefined;
+      if (!resData) {
+        throw new Error('레시피 데이터를 추출하지 못했습니다.');
+      }
+
       logger.info('ImportRecipeModal.handleAnalyze', `AI 분석 성공: ${resData.name}`);
 
       // 유효 카테고리 매핑
       let cat: RecipeCategory = '기타';
-      if (CATEGORY_LIST.includes(resData.category)) {
+      if (resData.category && (CATEGORY_LIST as readonly string[]).includes(resData.category)) {
         cat = resData.category as RecipeCategory;
       }
 

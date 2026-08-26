@@ -19,6 +19,7 @@ import {
 import { APP_CONFIG, CATEGORY_CONFIG } from '../config/appConfig';
 import { Recipe } from '../types/recipe';
 import { logger } from '../utils/logger';
+import { callAiApi } from '../utils/aiApiHelper';
 
 interface RecipeAiModalProps {
   /** 대상 레시피 (null이면 미표시) */
@@ -113,29 +114,21 @@ export const RecipeAiModal: React.FC<RecipeAiModalProps> = ({
           text: m.text,
         }));
 
-      const response = await fetch(APP_CONFIG.ai.askEndpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          recipe: {
-            name: recipe.name,
-            category: recipe.category,
-            ingredients: recipe.ingredients,
-            method: recipe.method,
-            userNotes: userNote || recipe.userNotes,
-            cookingTimeMinutes: recipe.cookingTimeMinutes,
-            difficulty: recipe.difficulty,
-          },
-          question: q,
-          chatHistory: history,
-        }),
-      });
+      const payload = {
+        recipe: {
+          name: recipe.name,
+          category: recipe.category,
+          ingredients: recipe.ingredients,
+          method: recipe.method,
+          userNotes: userNote || recipe.userNotes,
+          cookingTimeMinutes: recipe.cookingTimeMinutes,
+          difficulty: recipe.difficulty,
+        },
+        question: q,
+        chatHistory: history,
+      };
 
-      const data = await response.json();
-
-      if (!response.ok || !data.success) {
-        throw new Error(data.error || '답변을 불러오지 못했습니다.');
-      }
+      const data = await callAiApi<{ answer?: string }>(APP_CONFIG.ai.askEndpoint, payload);
 
       const modelMsg: ChatMessage = {
         id: (Date.now() + 1).toString(),
@@ -151,7 +144,7 @@ export const RecipeAiModal: React.FC<RecipeAiModalProps> = ({
       const errorMsg: ChatMessage = {
         id: (Date.now() + 1).toString(),
         role: 'model',
-        text: '⚠️ 죄송합니다. 일시적인 네트워크 오류로 답변을 불러오지 못했습니다. 잠시 후 다시 질문해주세요.',
+        text: `⚠️ ${err instanceof Error ? err.message : '일시적인 오류로 답변을 불러오지 못했습니다. 잠시 후 다시 질문해주세요.'}`,
         timestamp: Date.now(),
       };
       setMessages((prev) => [...prev, errorMsg]);

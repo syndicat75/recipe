@@ -26,6 +26,7 @@ import {
 import { APP_CONFIG, CATEGORY_CONFIG } from '../config/appConfig';
 import { Recipe } from '../types/recipe';
 import { logger } from '../utils/logger';
+import { callAiApi } from '../utils/aiApiHelper';
 
 interface AiChefViewProps {
   /** 현재 컨텍스트로 전달된 레시피 (선택 사항) */
@@ -169,17 +170,7 @@ export const AiChefView: React.FC<AiChefViewProps> = ({
         chatHistory,
       };
 
-      const response = await fetch(APP_CONFIG.ai.askEndpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(bodyPayload),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok || !data.success) {
-        throw new Error(data.error || 'AI 답변을 불러오지 못했습니다.');
-      }
+      const data = await callAiApi<{ answer?: string }>(APP_CONFIG.ai.askEndpoint, bodyPayload);
 
       const modelMsg: ChatMessage = {
         id: (Date.now() + 1).toString(),
@@ -197,7 +188,7 @@ export const AiChefView: React.FC<AiChefViewProps> = ({
       const errorMsg: ChatMessage = {
         id: (Date.now() + 1).toString(),
         role: 'model',
-        text: '⚠️ AI 답변을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.',
+        text: `⚠️ ${err instanceof Error ? err.message : 'AI 답변을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.'}`,
         timestamp: Date.now(),
         isError: true,
       };
