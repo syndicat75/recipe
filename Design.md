@@ -26,7 +26,8 @@
   - `POST /api/ai/import-recipe`: 웹 URL 또는 텍스트 기반 레시피 구조화 추출 (`api/ai/import-recipe.ts`)
   - `POST /api/ai/ask-recipe`: 레시피 컨텍스트 기반 AI 요리 상담 (`api/ai/ask-recipe.ts`)
   - `POST /api/ai/recommend-menu`: 자연어 기분/상황 기반 내 레시피 풀 매칭 추천 (`api/ai/recommend-menu.ts`)
-  - `GET /api/health`: 서비스 상태 진단 (`api/health.ts`)
+  - `GET /api/health`: 서비스 상태 진단 (`api/health.ts` - Gemini 모듈 미참조로 독립 진단 가능)
+  - **Dynamic Import 패턴**: Vercel 런타임 모듈 초기화 단계에서 발생할 수 있는 `@google/genai`, `dotenv`, 경로 해석 오류가 Vercel generic 500 HTML 에러를 유발하지 않도록, 모든 `api/ai/*.ts` 핸들러 내부 `try/catch` 블록에서 `await import('../../server/geminiService')`를 동적으로 호출하여 100% JSON 에러 응답을 보장.
   - `vercel.json`의 `/((?!api/.*).*)` 규칙을 통해 `/api/*` 요청이 SPA `index.html`로 폴백되지 않고 실제 서버리스 함수로 라우팅됨.
 - **로컬/독립 백엔드 (`server.ts`)**:
   - 개발 모드(`npm run dev`)에서 Vite 미들웨어(`middlewareMode: true`)와 통합 구동.

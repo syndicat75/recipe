@@ -1,14 +1,16 @@
 /**
  * @file api/ai/ask-recipe.ts
- * @description Vercel Serverless Function - AI 요리사 레시피 Q&A 상담 API
+ * @description Vercel Serverless Function - AI 요리사 레시피 Q&A 상담 API.
+ * 모듈 로딩 오류가 Vercel 500 Generic Error로 크래시되지 않도록 handler 내부 dynamic import 방식을 적용합니다.
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { askChefAboutRecipe } from '../../server/geminiService';
 
 /**
  * Vercel Serverless Function 핸들러
  * POST /api/ai/ask-recipe
+ * @param req VercelRequest 요청 객체
+ * @param res VercelResponse 응답 객체
  */
 export default async function handler(req: VercelRequest, res: VercelResponse): Promise<void> {
   // 항상 JSON 응답 헤더 설정
@@ -58,6 +60,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       return;
     }
 
+    // dynamic import를 통해 모듈 초기화 에러도 핸들러 내부 catch에서 안전하게 JSON으로 반환
+    const { askChefAboutRecipe } = await import('../../server/geminiService');
+
     const result = await askChefAboutRecipe({ recipe, question, chatHistory });
 
     if (!result.success) {
@@ -67,10 +72,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
 
     res.status(200).json(result);
   } catch (error) {
-    console.error('Unhandled error in /api/ai/ask-recipe:', error);
+    console.error('AI function runtime error in /api/ai/ask-recipe:', error);
     res.status(500).json({
       success: false,
-      error: 'AI 답변 생성 중 문제가 발생했습니다.',
+      error: 'AI 서버 실행 중 오류가 발생했습니다.',
       details: error instanceof Error ? error.message : String(error),
     });
   }
