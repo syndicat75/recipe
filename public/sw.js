@@ -1,9 +1,10 @@
 /**
  * @file public/sw.js
- * @description 내 입맛 레시피 서비스 워커 (v2.1: Navigation Network-First 전략, PWA 오프라인 캐싱 지원)
+ * @description 내 입맛 레시피 서비스 워커 (v2.2: GET+HTTPS+Same-Origin 보호 필터, Navigation Network-First 전략, PWA 오프라인 캐싱 지원)
+ * chrome-extension://, non-GET, cross-origin, /api/* 요청 캐싱 차단으로 Cache.put 에러 원천 방지
  */
 
-const CACHE_NAME = 'my-recipe-cache-v2.1';
+const CACHE_NAME = 'my-recipe-cache-v2.2';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -37,39 +38,65 @@ self.addEventListener('activate', (event) => {
 });
 
 // 네트워크 요청 가로채기
-// 1. /api/ 요청 -> 캐시 없이 네트워크 직접 통과
-// 2. Navigation 요청 (/ 및 /index.html) -> Network First (최신 JS/배포본 즉시 반영, 오프라인 시 캐시 폴백)
-// 3. 정적 자산 (JS, CSS, Images, Fonts) -> Stale-While-Revalidate
+// 1. GET 외 메소드(POST, PUT, DELETE 등) -> 직접 통과 (캐시 제외)
+// 2. HTTP/HTTPS 외 스킴(chrome-extension://, blob:, data: 등) -> 직접 통과 (캐시 제외)
+// 3. 외부 Origin 요청 -> 직접 통과 (캐시 제외)
+// 4. /api/ 요청 -> 캐시 없이 네트워크 직접 통과
+// 5. Navigation 요청 (/ 및 /index.html) -> Network First (최신 JS/배포본 즉시 반영, 오프라인 시 캐시 폴백)
+// 6. 정적 자산 (JS, CSS, Images, Fonts) -> Stale-While-Revalidate
 self.addEventListener('fetch', (event) => {
-  const url = new URL(event.request.url);
+  const request = event.request;
 
-  // 1. API 요청은 항상 네트워크로 직접 전송
+  // Cache API는 GET 요청만 처리한다.
+  // POST/PUT/DELETE 등의 요청은 서비스워커가 가로채지 않는다.
+  if (request.method !== 'GET') {
+    return;
+  }
+
+  const url = new URL(request.url);
+
+  // chrome-extension://, blob://, data:// 등
+  // HTTP(S)가 아닌 요청은 캐시하지 않는다.
+  if (
+    url.protocol !== 'http:' &&
+    url.protocol !== 'https:'
+  ) {
+    return;
+  }
+
+  // 이 PWA 자신의 정적 자산만 Service Worker에서 캐시한다.
+  // 외부 사이트, 브라우저 확장프로그램 등의 요청은 그대로 통과시킨다.
+  if (url.origin !== self.location.origin) {
+    return;
+  }
+
+  // API 요청은 절대 캐시하지 않는다.
   if (url.pathname.startsWith('/api/')) {
     return;
   }
 
-  // 2. Navigation 및 HTML 문서는 Network First 전략 적용
+  // Navigation 및 HTML 문서는 Network First 전략 적용
   const isNavigationOrHtml =
-    event.request.mode === 'navigate' ||
+    request.mode === 'navigate' ||
     url.pathname === '/' ||
     url.pathname === '/index.html' ||
-    event.request.destination === 'document';
+    request.destination === 'document';
 
   if (isNavigationOrHtml) {
     event.respondWith(
-      fetch(event.request)
+      fetch(request)
         .then((networkResponse) => {
           if (networkResponse && networkResponse.status === 200) {
             const responseToCache = networkResponse.clone();
             caches.open(CACHE_NAME).then((cache) => {
-              cache.put(event.request, responseToCache);
+              cache.put(request, responseToCache);
             });
           }
           return networkResponse;
         })
         .catch(() => {
           // 네트워크 실패 시 캐시된 index.html 반환 (오프라인 PWA 지원)
-          return caches.match(event.request).then((cached) => {
+          return caches.match(request).then((cached) => {
             return cached || caches.match('/index.html');
           });
         })
@@ -77,10 +104,10 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // 3. 기타 정적 자산(CSS, JS, 이미지 등): Stale-While-Revalidate
+  // 기타 정적 자산(CSS, JS, 이미지 등): Stale-While-Revalidate
   event.respondWith(
-    caches.match(event.request).then((cachedResponse) => {
-      const fetchPromise = fetch(event.request)
+    caches.match(request).then((cachedResponse) => {
+      const fetchPromise = fetch(request)
         .then((networkResponse) => {
           if (
             networkResponse &&
@@ -89,7 +116,7 @@ self.addEventListener('fetch', (event) => {
           ) {
             const responseToCache = networkResponse.clone();
             caches.open(CACHE_NAME).then((cache) => {
-              cache.put(event.request, responseToCache);
+              cache.put(request, responseToCache);
             });
           }
           return networkResponse;
@@ -102,4 +129,3 @@ self.addEventListener('fetch', (event) => {
     })
   );
 });
-
