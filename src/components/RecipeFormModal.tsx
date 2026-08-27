@@ -212,11 +212,7 @@ export const RecipeFormModal: React.FC<RecipeFormModalProps> = ({
 
     const targetId = isEditMode && recipeToEdit ? recipeToEdit.id : Date.now();
     const createdAt = isEditMode && recipeToEdit ? recipeToEdit.createdAt || Date.now() : Date.now();
-    const targetScope = isEditMode && recipeToEdit?.syncScope
-      ? recipeToEdit.syncScope
-      : isAdmin
-      ? 'public'
-      : 'local';
+    const targetScope: 'public' = 'public';
 
     const recipeData: Recipe = {
       id: targetId,
@@ -249,13 +245,12 @@ export const RecipeFormModal: React.FC<RecipeFormModalProps> = ({
           return;
         }
 
-        if (result.scope === 'public') {
-          showToast('☁️ 공개 레시피로 저장되었습니다.', 'success');
-        } else if (result.scope === 'private') {
-          showToast('☁️ 내 레시피가 클라우드에 저장되었습니다.\n다른 기기에서도 사용할 수 있습니다.', 'success');
-        } else {
-          showToast('📱 이 기기에 저장되었습니다.\nGoogle 로그인하면 다른 기기와 동기화할 수 있습니다.', 'info');
-        }
+        showToast(
+          isEditMode
+            ? `✨ '${recipeData.name}' 레시피가 수정되었습니다.`
+            : `🎉 '${recipeData.name}' 레시피가 공개 DB에 등록되었습니다!`,
+          'success'
+        );
       } else {
         showToast(
           isEditMode

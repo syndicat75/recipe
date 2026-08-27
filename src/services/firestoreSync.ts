@@ -20,6 +20,7 @@ import {
 import { db, isFirebaseReady } from '../lib/firebase';
 import { Recipe, ShoppingItem } from '../types/recipe';
 import { CloudDataSummary, UserSettingsDoc } from '../types/firebase';
+import { INITIAL_RECIPES } from '../data/initialRecipes';
 import { logger } from '../utils/logger';
 
 /**
@@ -686,3 +687,140 @@ export function mergeRecipeLists(localRecipes: Recipe[], cloudRecipes: Recipe[])
 
   return Array.from(recipeMap.values());
 }
+
+/**
+ * 관리자 전용: 기존 개인/로컬/기본 레시피를 Firestore 공개 DB(/recipes)로 안전하게 병합 이전
+ * 
+ * 병합 대상:
+ * 1. Firestore /recipes 기존 문서 (절대 삭제 금지, 원본 보존)
+ * 2. Firestore /users/{adminUid}/recipes 문서 (관리자 개인 보관함에 들어간 레시피)
+ * 3. 로컬 기기 레시피 및 INITIAL_RECIPES(기본 26개 시드 레시피)
+ * 
+ * 처리 방식:
+ * - ID 기준으로 중복 없이 스마트 병합
+ * - 모든 문서에 syncScope: 'public' 부여
+ * - publishAllRecipesToPublic()로 일괄 커밋 (배치 청크)
+ * - 기존 데이터 절대 삭제 없음
+ */
+export async function migrateAllRecipesToPublicDb(
+  adminUid: string,
+  localRecipes: Recipe[]
+): Promise<{ totalMerged: number; publicCount: number }> {
+  logger.info(
+    'firestoreSync.migrateAllRecipesToPublicDb',
+    `관리자 공개 DB 마이그레이션 시작 (Admin UID: ${adminUid}, 로컬 수: ${localRecipes.length})`
+  );
+
+  if (!db || !isFirebaseReady) {
+    throw new Error('Firestore에 연결할 수 없습니다.');
+  }
+
+  const recipeMap = new Map<number, Recipe>();
+
+  // 1. 기본 시드 레시피 26개 삽입 (누락 방지 기본 토대)
+  INITIAL_RECIPES.forEach((r) => {
+    recipeMap.set(r.id, { ...r, syncScope: 'public' });
+  });
+
+  // 2. 로컬 기기 레시피 병합
+  localRecipes.forEach((r) => {
+    const existing = recipeMap.get(r.id);
+    if (!existing) {
+      recipeMap.set(r.id, { ...r, syncScope: 'public' });
+    } else {
+      const localUpdated = Number(r.updatedAt || r.createdAt || 0);
+      const existingUpdated = Number(existing.updatedAt || existing.createdAt || 0);
+      if (localUpdated >= existingUpdated || r.isCustom) {
+        recipeMap.set(r.id, { ...existing, ...r, syncScope: 'public' });
+      }
+    }
+  });
+
+  // 3. Firestore /users/{adminUid}/recipes 조회 및 병합
+  if (adminUid) {
+    try {
+      const userColRef = collection(db, 'users', adminUid, 'recipes');
+      const userSnap = await getDocs(userColRef);
+      logger.info('firestoreSync.migrateAllRecipesToPublicDb', `관리자 개인 레시피 조회 성공: ${userSnap.docs.length}개`);
+
+      userSnap.docs.forEach((docSnap) => {
+        const data = docSnap.data();
+        const id = Number(data.id || docSnap.id);
+        const userRecipe: Recipe = {
+          ...data,
+          id,
+          name: String(data.name || '무제 레시피'),
+          category: data.category || '기타',
+          ingredients: String(data.ingredients || ''),
+          method: String(data.method || ''),
+          ingredientCount: Number(data.ingredientCount || 0),
+          stepCount: Number(data.stepCount || 0),
+          icon: String(data.icon || '🍳'),
+          syncScope: 'public',
+        } as Recipe;
+
+        const existing = recipeMap.get(id);
+        if (!existing) {
+          recipeMap.set(id, userRecipe);
+        } else {
+          const userUpdated = Number(userRecipe.updatedAt || userRecipe.createdAt || 0);
+          const existingUpdated = Number(existing.updatedAt || existing.createdAt || 0);
+          if (userUpdated >= existingUpdated) {
+            recipeMap.set(id, { ...existing, ...userRecipe, syncScope: 'public' });
+          }
+        }
+      });
+    } catch (err) {
+      logger.warn('firestoreSync.migrateAllRecipesToPublicDb', '관리자 개인 레시피 조회 경고 (계속 진행)', err);
+    }
+  }
+
+  // 4. Firestore /recipes 기존 공개 문서 조회 및 병합 (기존 공개 문서 절대 덮어써서 날아가지 않도록 보존)
+  try {
+    const publicColRef = collection(db, 'recipes');
+    const publicSnap = await getDocs(publicColRef);
+    logger.info('firestoreSync.migrateAllRecipesToPublicDb', `기존 공개 레시피 조회: ${publicSnap.docs.length}개`);
+
+    publicSnap.docs.forEach((docSnap) => {
+      const data = docSnap.data();
+      const id = Number(data.id || docSnap.id);
+      const pubRecipe: Recipe = {
+        ...data,
+        id,
+        name: String(data.name || '무제 레시피'),
+        category: data.category || '기타',
+        ingredients: String(data.ingredients || ''),
+        method: String(data.method || ''),
+        ingredientCount: Number(data.ingredientCount || 0),
+        stepCount: Number(data.stepCount || 0),
+        icon: String(data.icon || '🍳'),
+        syncScope: 'public',
+      } as Recipe;
+
+      const existing = recipeMap.get(id);
+      if (!existing) {
+        recipeMap.set(id, pubRecipe);
+      } else {
+        // 기존 공개 DB 버전 우선 병합
+        recipeMap.set(id, { ...existing, ...pubRecipe, syncScope: 'public' });
+      }
+    });
+  } catch (err) {
+    logger.error('firestoreSync.migrateAllRecipesToPublicDb', '기존 공개 레시피 조회 오류', err);
+  }
+
+  const mergedList = Array.from(recipeMap.values());
+  logger.info(
+    'firestoreSync.migrateAllRecipesToPublicDb',
+    `최종 병합된 공개 레시피 수: ${mergedList.length}개 -> publishAllRecipesToPublic 실행`
+  );
+
+  // 5. 공개 컬렉션(/recipes)으로 일괄 커밋
+  await publishAllRecipesToPublic(mergedList);
+
+  return {
+    totalMerged: mergedList.length,
+    publicCount: mergedList.length,
+  };
+}
+

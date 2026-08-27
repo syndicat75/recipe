@@ -648,7 +648,7 @@ ${userNote ? `\n[📝 나의 메모]\n${userNote}` : ''}`;
           {/* Custom Recipe Management (Edit / Delete / Family Share) */}
           <div className="flex flex-wrap items-center justify-between gap-3 pt-4 border-t border-stone-200/60">
             <div className="flex items-center gap-2">
-              {onToggleFamilyShare && (
+              {isAdmin && onToggleFamilyShare && (
                 <button
                   type="button"
                   onClick={() => onToggleFamilyShare(recipe)}
@@ -669,7 +669,7 @@ ${userNote ? `\n[📝 나의 메모]\n${userNote}` : ''}`;
             </div>
 
             <div className="flex items-center gap-2">
-              {(isAdmin || recipe.syncScope === 'local' || recipe.syncScope === 'private' || recipe.isCustom) && (
+              {isAdmin && (
                 <>
                   <button
                     type="button"

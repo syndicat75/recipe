@@ -18,6 +18,8 @@ interface AboutSectionProps {
   onInstallPwa?: () => void;
   /** PWA 설치 가능 여부 */
   canInstallPwa?: boolean;
+  /** 관리자 여부 */
+  isAdmin?: boolean;
 }
 
 /**
@@ -29,6 +31,7 @@ export const AboutSection: React.FC<AboutSectionProps> = ({
   onOpenImportRecipe,
   onInstallPwa,
   canInstallPwa,
+  isAdmin = false,
 }) => {
   logger.debug('AboutSection', '이용안내 섹션 렌더링');
 
@@ -69,26 +72,47 @@ export const AboutSection: React.FC<AboutSectionProps> = ({
             </div>
           </div>
 
-          {/* Card 2: 외부 레시피 AI 가져오기 */}
-          <div
-            onClick={onOpenImportRecipe}
-            className="group flex flex-col justify-between rounded-[1.75rem] border border-orange-100 bg-[#fffaf3] p-6 transition duration-300 hover:-translate-y-1 hover:border-orange-200 hover:shadow-lg hover:shadow-orange-950/5 cursor-pointer"
-          >
-            <div>
-              <div className="grid h-12 w-12 place-items-center rounded-2xl bg-amber-500 text-white shadow-sm transition group-hover:scale-110">
-                <Sparkles className="h-6 w-6" />
+          {/* Card 2: 관리자(AI 가져오기) vs 일반(조리 집중 모드) */}
+          {isAdmin ? (
+            <div
+              onClick={onOpenImportRecipe}
+              className="group flex flex-col justify-between rounded-[1.75rem] border border-orange-100 bg-[#fffaf3] p-6 transition duration-300 hover:-translate-y-1 hover:border-orange-200 hover:shadow-lg hover:shadow-orange-950/5 cursor-pointer"
+            >
+              <div>
+                <div className="grid h-12 w-12 place-items-center rounded-2xl bg-amber-500 text-white shadow-sm transition group-hover:scale-110">
+                  <Sparkles className="h-6 w-6" />
+                </div>
+                <h3 className="mt-5 font-soft text-lg font-black text-stone-900">
+                  📥 외부 레시피 AI 가져오기
+                </h3>
+                <p className="mt-2 text-xs leading-relaxed text-stone-600">
+                  블로그 URL이나 요리 텍스트를 붙여넣으면 Gemini AI가 재료와 조리순서로 자동 정리해 공개 DB에 저장합니다.
+                </p>
               </div>
-              <h3 className="mt-5 font-soft text-lg font-black text-stone-900">
-                📥 외부 레시피 AI 가져오기
-              </h3>
-              <p className="mt-2 text-xs leading-relaxed text-stone-600">
-                블로그 URL이나 요리 텍스트를 붙여넣으면 Gemini AI가 재료와 조리순서로 자동 정리해 내 요리책에 저장합니다.
-              </p>
+              <div className="mt-4 pt-3 border-t border-orange-200/40 text-xs font-bold text-amber-600 group-hover:text-amber-700">
+                레시피 가져오기 (관리자) →
+              </div>
             </div>
-            <div className="mt-4 pt-3 border-t border-orange-200/40 text-xs font-bold text-amber-600 group-hover:text-amber-700">
-              레시피 가져오기 →
+          ) : (
+            <div
+              className="group flex flex-col justify-between rounded-[1.75rem] border border-orange-100 bg-[#fffaf3] p-6 transition duration-300 hover:-translate-y-1 hover:border-orange-200 hover:shadow-lg hover:shadow-orange-950/5"
+            >
+              <div>
+                <div className="grid h-12 w-12 place-items-center rounded-2xl bg-amber-500 text-white shadow-sm transition group-hover:scale-110">
+                  <Timer className="h-6 w-6" />
+                </div>
+                <h3 className="mt-5 font-soft text-lg font-black text-stone-900">
+                  ⏱️ 조리 집중 모드 & 타이머
+                </h3>
+                <p className="mt-2 text-xs leading-relaxed text-stone-600">
+                  각 조리 단계별 스마트 타이머와 대형 화면 글씨로 조리 중에도 화면 꺼짐 없이 손쉽게 레시피를 따라할 수 있습니다.
+                </p>
+              </div>
+              <div className="mt-4 pt-3 border-t border-orange-200/40 text-xs font-bold text-stone-500">
+                레시피 상세에서 바로 이용 가능
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Card 3: AI 요리사 Q&A (Requirement 3: 전체 클릭 가능한 기능 진입점) */}
           <div

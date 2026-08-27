@@ -169,6 +169,19 @@ export function getSavedRecipeNotes(): Record<number, string> {
 }
 
 /**
+ * 레시피별 사용자 메모 맵 전체를 로컬 스토리지에 저장합니다.
+ * @param notes 레시피 ID를 키로 하는 메모 객체
+ */
+export function saveAllRecipeNotes(notes: Record<number, string>): void {
+  logger.debug('storage.saveAllRecipeNotes', '전체 레시피 메모 일괄 저장');
+  try {
+    localStorage.setItem(APP_CONFIG.storageKeys.recipeNotes, JSON.stringify(notes || {}));
+  } catch (error) {
+    logger.error('storage.saveAllRecipeNotes', '레시피 메모 전체 저장 실패', error);
+  }
+}
+
+/**
  * 특정 레시피에 대한 사용자 메모를 저장합니다.
  * @param recipeId 레시피 고유 ID
  * @param note 저장할 메모 텍스트

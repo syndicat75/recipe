@@ -510,8 +510,8 @@ export const Header: React.FC<HeaderProps> = ({
                         }}
                         className="w-full flex items-center gap-2 rounded-xl px-2.5 py-2 text-xs font-semibold text-stone-700 hover:bg-orange-50 hover:text-orange-900 transition text-left"
                       >
-                        <Cloud className="h-4 w-4 text-orange-500" />
-                        <span>클라우드 공개 레시피 동기화</span>
+                        <Database className="h-4 w-4 text-orange-500" />
+                        <span>🌐 공개 레시피 DB로 이전하기</span>
                       </button>
                     )}
                   </div>

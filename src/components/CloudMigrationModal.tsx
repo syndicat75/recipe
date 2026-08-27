@@ -64,9 +64,13 @@ export const CloudMigrationModal: React.FC<CloudMigrationModalProps> = ({
                 <Cloud className="h-6 w-6 text-white" />
               </div>
               <div>
-                <h3 className="text-lg font-black tracking-tight">클라우드 레시피 동기화 안내</h3>
+                <h3 className="text-lg font-black tracking-tight">
+                  {mode === 'admin_public' ? '🌐 공개 레시피 DB 통합 이전' : '클라우드 레시피 동기화 안내'}
+                </h3>
                 <p className="text-xs text-orange-100 mt-0.5">
-                  {mode === 'initial'
+                  {mode === 'admin_public'
+                    ? '기존 개인/로컬 레시피를 공개 레시피 DB로 이전하시겠습니까?'
+                    : mode === 'initial'
                     ? '기기 속 레시피를 안전하게 클라우드로 백업하세요'
                     : '기기와 클라우드 데이터 동기화 방법을 선택하세요'}
                 </p>
@@ -87,7 +91,46 @@ export const CloudMigrationModal: React.FC<CloudMigrationModalProps> = ({
 
         {/* Body Content */}
         <div className="p-6 space-y-5">
-          {mode === 'initial' ? (
+          {mode === 'admin_public' ? (
+            /* Case: 관리자 공개 DB 마이그레이션 (users/{uid}/recipes + local + initial -> /recipes) */
+            <div className="space-y-4">
+              <div className="rounded-2xl bg-orange-50/90 p-4 border border-orange-200/80 text-stone-800">
+                <div className="flex items-start gap-3">
+                  <span className="text-2xl mt-0.5">🌐</span>
+                  <div>
+                    <p className="font-bold text-sm text-stone-900">
+                      기존 개인/로컬 레시피를 공개 레시피 DB로 이전하시겠습니까?
+                    </p>
+                    <p className="text-xs text-stone-600 mt-1.5 leading-relaxed">
+                      관리자 개인 보관함(<code className="rounded bg-orange-100/80 px-1 py-0.5 font-mono text-orange-900 text-[11px]">users/{'{uid}'}/recipes</code>), 현재 기기(로컬), 기본 26개 시드 레시피를 단일 진실 공급원인 Firestore <code className="rounded bg-orange-100/80 px-1 py-0.5 font-mono text-orange-900 text-[11px]">/recipes</code>로 안전하게 병합합니다.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="rounded-2xl border border-stone-200 bg-stone-50 p-3.5 text-center">
+                  <span className="text-[11px] font-bold text-stone-500">현재 Firestore /recipes</span>
+                  <div className="text-2xl font-black text-stone-900 mt-0.5">{cloudCount}개</div>
+                </div>
+                <div className="rounded-2xl border border-orange-200 bg-orange-50/70 p-3.5 text-center">
+                  <span className="text-[11px] font-bold text-orange-600">이전 후 예상 총 레시피</span>
+                  <div className="text-2xl font-black text-orange-600 mt-0.5">{Math.max(27, cloudCount, localCount)}개</div>
+                </div>
+              </div>
+
+              <div className="rounded-xl bg-stone-50 p-3.5 border border-stone-200/80 text-xs text-stone-600 space-y-2">
+                <div className="flex items-center gap-2 font-bold text-stone-800">
+                  <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />
+                  <span>기존 공개 DB 문서는 절대 삭제되지 않고 병합 추가됩니다.</span>
+                </div>
+                <div className="flex items-center gap-2 font-bold text-stone-800">
+                  <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />
+                  <span>이전 완료 후 비로그인 방문자 및 모든 기기에서 {Math.max(27, cloudCount, localCount)}개 레시피가 동일하게 조회됩니다.</span>
+                </div>
+              </div>
+            </div>
+          ) : mode === 'initial' ? (
             /* Case 1: 최초 로그인 (로컬에만 데이터 존재, 클라우드는 0개) */
             <div className="space-y-4">
               <div className="rounded-2xl bg-orange-50/80 p-4 border border-orange-100 text-stone-800">
@@ -140,7 +183,36 @@ export const CloudMigrationModal: React.FC<CloudMigrationModalProps> = ({
 
           {/* Action Buttons */}
           <div className="pt-2 space-y-2.5">
-            {mode === 'initial' ? (
+            {mode === 'admin_public' ? (
+              <div className="flex flex-col gap-2 sm:flex-row-reverse">
+                <button
+                  type="button"
+                  onClick={onUploadLocal}
+                  disabled={isMigrating}
+                  className="flex-1 flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-orange-500 to-amber-500 py-3.5 px-4 text-sm font-black text-white shadow-md shadow-orange-500/20 hover:from-orange-600 hover:to-amber-600 transition disabled:opacity-50"
+                >
+                  {isMigrating ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span>공개 DB(/recipes)로 이전 중...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Database className="h-4 w-4" />
+                      <span>🌐 공개 레시피 DB로 이전하기</span>
+                    </>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={onClose}
+                  disabled={isMigrating}
+                  className="rounded-2xl border border-stone-200 bg-white py-3.5 px-5 text-sm font-bold text-stone-600 hover:bg-stone-50 transition disabled:opacity-50"
+                >
+                  나중에
+                </button>
+              </div>
+            ) : mode === 'initial' ? (
               <div className="flex flex-col gap-2 sm:flex-row-reverse">
                 <button
                   type="button"

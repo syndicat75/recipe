@@ -163,37 +163,35 @@
 
 ## 4. 데이터 영속성, 클라우드 동기화 및 보안 (Data Persistence & Cloud Sync)
 
-### 4.1 3단계 저장 아키텍처 (3-Tier Storage Architecture)
-기존의 단일/이원 저장 구조로 인한 데이터 덮어쓰기 손실 및 기기간 동기화 불일치를 원천 해결하기 위해, 다음과 같은 **엄격한 3단계 저장 및 동기화 모델**을 구축하였습니다:
+### 4.1 단일 진실 공급원 아키텍처 (Single Source of Truth - Firestore `/recipes`)
+앱에 등록된 정식 레시피는 **로그인 여부(비로그인 외부 방문자, 일반 로그인 사용자, 관리자)와 관계없이 모든 사용자에게 동일하게 제공**되어야 합니다.
+이를 위해 레시피의 단일 진실 공급원(Single Source of Truth)을 Firestore `/recipes`로 일원화하고, 엄격한 권한 분리 모델을 적용하였습니다:
 
-| 구분 (Scope) | 저장 위치 | 대상 사용자 | 권한 및 특징 |
-| :--- | :--- | :--- | :--- |
-| **`public`** (공개) | Firestore `/recipes` | 모든 방문자 | 관리자(`isAdmin`)만 등록/수정/삭제 가능. 모든 사용자에게 실시간 동기화. |
-| **`private`** (개인) | Firestore `/users/{uid}/recipes` | 로그인 사용자 | 로그인한 본인만 읽기/쓰기 가능 (`request.auth.uid == userId`). 본인의 모든 기기에서 실시간 동기화. |
-| **`local`** (기기 전용) | 브라우저 `localStorage` | 비로그인 게스트 | 현재 기기에만 안전하게 보관. 로그인 후 클라우드 마이그레이션을 통해 `private`로 원클릭 승격 가능. |
+| 사용자 구분 | 레시피 목록 조회 | 레시피 등록 / 수정 / 삭제 | 개인 설정 (북마크, 꿀팁 메모, 장보기) |
+| :--- | :---: | :---: | :---: |
+| **비로그인 외부 방문자** | ✅ 전체 공식 레시피 조회 | ❌ 등록/수정/삭제 불가 (버튼 미노출 및 차단) | 기기 `localStorage`에 영속화 |
+| **일반 로그인 사용자** | ✅ 전체 공식 레시피 조회 | ❌ 등록/수정/삭제 불가 (관리자 전용 안내) | 계정 클라우드(`users/{uid}/*`) 실시간 동기화 |
+| **관리자 (`isAdmin`)** | ✅ 전체 공식 레시피 조회 | ✅ `/recipes` 직접 등록 / 수정 / 삭제 가능 | 계정 클라우드 및 공개 DB 원클릭 마이그레이션 |
 
-#### 4.1.1 3단계 실시간 스냅샷 병합 원칙 (`recipeMerger.ts`)
-화면에 렌더링되는 전체 레시피 목록은 `mergeThreeTiers(publicList, privateList, localList)` 함수를 통해 통합됩니다:
-1. **절대 덮어쓰기 금지**: Firestore 공개 레시피 스냅샷 수신 시 로컬/개인 레시피를 절대 replace하지 않고 3-tier 병합 실행.
-2. **우선순위 계층**:
-   - `private` 레시피는 동일 ID의 `public` 레시피보다 우선.
-   - `local` 레시피는 동일 ID의 `public` 레시피보다 우선.
-   - `private`와 `local` 충돌 시 `updatedAt`이 최신인 레시피 우선.
-3. **로그아웃 격리**: 사용자가 로그아웃하면 `users/{uid}/recipes` 리스너를 해제하고, `private` 레시피를 화면 및 로컬스토리지에서 즉시 제거하여 타 사용자 정보 노출을 차단하며 `public` 및 `local` 레시피만 보존.
+#### 4.1.1 실시간 동기화 및 데이터 일관성 원칙
+1. **단일 진실 공급원 (`subscribeToPublicRecipes`)**:
+   - 앱 구동 시 Firestore `/recipes` 컬렉션을 실시간 구독하여 모든 방문자에게 동일한 공식 레시피 목록을 공급합니다.
+   - 네트워크 연결 전이나 오프라인 상태에서는 초기 시드 및 로컬 캐시(`my_recipes_data`)가 즉시 렌더링되고, 원격 스냅샷 수신 시 안전하게 병합(`mergeRecipeLists`)됩니다.
+2. **로그아웃 시 레시피 영속성 유지**:
+   - 로그아웃하더라도 공식 레시피 목록(`recipes`)은 절대 비우거나 지우지 않습니다.
+   - 사용자 개인 설정(북마크, 꿀팁 메모, 장보기 목록)만 로컬스토리지 저장본으로 안전하게 전환 복구합니다.
+3. **관리자 마이그레이션 도구 (`migrateAllRecipesToPublicDb`)**:
+   - 관리자가 로컬 시드(27개 등)나 새 레시피를 Firestore `/recipes`에 일괄 배포할 수 있는 전용 마이그레이션 파이프라인을 지원합니다.
+   - 기존 원격 문서를 절대 임의 삭제하지 않고, 400개 단위 청크 배치(`chunkArray`)로 안전하게 병합 추가합니다.
 
 #### 4.1.2 저장 및 삭제 흐름 정책
 1. **저장 정책 (`handleSaveRecipe`)**:
-   - 관리자(`isAdmin`): `/recipes` (public) 저장
-   - 로그인 일반 사용자(`user`): `/users/{uid}/recipes` (private) 저장
-   - 비로그인 게스트: `localStorage` (local) 저장
-   - **클라우드 선행 저장 원칙**: Firestore 대상일 경우 클라우드에 성공적으로 기록되기 전까지 성공 Toast 및 상태 변경을 유보하여 데이터 일관성 보장. 비관리자의 `public` 레시피 수정/삭제 시도는 차단.
+   - 관리자(`isAdmin`)만 등록 및 수정이 허용되며, 데이터는 항상 Firestore `/recipes`에 `syncScope: 'public'`으로 기록됩니다.
+   - 비관리자의 수정 시도는 UI(버튼 비활성화) 및 로직 레벨에서 원천 차단됩니다.
 2. **삭제 정책 (`handleDeleteRecipeRequest`)**:
-   - `public`: 관리자만 `deletePublicRecipe()` 호출
-   - `private`: 본인만 `deletePrivateRecipe(user.uid, id)` 호출
-   - `local`: 기기 `localStorage`에서만 삭제
-3. **마이그레이션 정책 (`migrateLocalDataToCloud`)**:
-   - 일반 사용자의 로컬 레시피는 반드시 `users/{uid}/recipes`로만 배치(batch) 업로드하여 `private`로 전환.
-   - 대용량 데이터 시 Firestore 500개 쓰기 제한을 방어하기 위해 400개 단위 청크 배치 분할 적용.
+   - 관리자(`isAdmin`)만 `deletePublicRecipe()`를 통해 공개 DB에서 안전하게 영구 삭제할 수 있습니다.
+3. **개인화 데이터 격리**:
+   - 사용자별 즐겨찾기, 레시피 메모, 장보기 목록은 `users/{uid}/settings/*` 및 `users/{uid}/shoppingList/*`에 독립적으로 격리 동기화됩니다.
 
 ### 4.2 Firebase Authentication & Cloud Firestore
 - **Firebase 전용 Named App 격리 (`firebase.ts`)**:

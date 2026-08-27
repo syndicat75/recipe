@@ -30,6 +30,8 @@ interface RecipeListProps {
   onResetFilters: () => void;
   /** 새 레시피 추가 모달 열기 핸들러 */
   onOpenAddRecipe?: () => void;
+  /** 관리자 여부 */
+  isAdmin?: boolean;
 }
 
 /**
@@ -46,6 +48,7 @@ export const RecipeList: React.FC<RecipeListProps> = ({
   onOpenDetail,
   onResetFilters,
   onOpenAddRecipe,
+  isAdmin = false,
 }) => {
   /**
    * 결과 텍스트를 계산하여 반환합니다.
@@ -118,6 +121,7 @@ export const RecipeList: React.FC<RecipeListProps> = ({
               isBookmarked={bookmarkedIds.includes(recipe.id)}
               onToggleBookmark={onToggleBookmark}
               onOpenDetail={onOpenDetail}
+              isAdmin={isAdmin}
             />
           ))}
         </div>
@@ -140,7 +144,7 @@ export const RecipeList: React.FC<RecipeListProps> = ({
           <p className="mt-2 max-w-md text-xs leading-6 text-stone-500 sm:text-sm">
             {activeCategory === '즐겨찾기'
               ? '자주 요리하는 레시피의 북마크(♡) 버튼을 눌러 모아보세요.'
-              : '철자를 확인하시거나 새로운 나만의 레시피를 직접 등록해보세요.'}
+              : '철자를 확인하시거나 다른 검색어를 입력해보세요.'}
           </p>
 
           <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
@@ -153,7 +157,7 @@ export const RecipeList: React.FC<RecipeListProps> = ({
               <span>전체 레시피 보기</span>
             </button>
 
-            {onOpenAddRecipe && (
+            {isAdmin && onOpenAddRecipe && (
               <button
                 type="button"
                 onClick={onOpenAddRecipe}

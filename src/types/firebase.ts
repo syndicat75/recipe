@@ -43,7 +43,7 @@ export interface CloudDataSummary {
 /**
  * 로컬 ↔ 클라우드 데이터 마이그레이션 모드
  */
-export type MigrationMode = 'initial' | 'conflict';
+export type MigrationMode = 'initial' | 'conflict' | 'admin_public';
 
 /**
  * 마이그레이션 모달 상태 인터페이스
