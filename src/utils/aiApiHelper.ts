@@ -44,7 +44,7 @@ export async function callAiApi<T = unknown>(
     throw new Error('사진 용량이 너무 큽니다. 더 작은 사진을 선택해주세요.');
   }
 
-  // 2. Fetch 실행
+  // 2. Fetch 실행 (최대 28초 제한시간 적용으로 무한 로딩 방지)
   let response: Response;
   try {
     response = await fetch(endpoint, {
@@ -53,9 +53,13 @@ export async function callAiApi<T = unknown>(
         'Content-Type': 'application/json',
       },
       body: jsonString,
+      signal: AbortSignal.timeout(28000),
     });
   } catch (netErr) {
-    logger.error('aiApiHelper.callAiApi', `네트워크 통신 오류: ${endpoint}`, netErr);
+    logger.error('aiApiHelper.callAiApi', `네트워크/타임아웃 오류: ${endpoint}`, netErr);
+    if (netErr instanceof Error && (netErr.name === 'TimeoutError' || netErr.name === 'AbortError')) {
+      throw new Error('AI 분석 시간이 초과되었습니다. 잠시 후 다시 시도해주세요.');
+    }
     throw new Error('인터넷 연결 상태를 확인하거나 잠시 후 다시 시도해주세요.');
   }
 

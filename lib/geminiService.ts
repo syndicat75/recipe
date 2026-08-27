@@ -1,12 +1,15 @@
 /**
  * @file lib/geminiService.ts
- * @description Gemini 3.7 Flash 모델을 활용한 레시피 AI 서비스 핵심 비즈니스 로직.
- * 웹 URL/텍스트 분석, 요리책/메모 사진 멀티모달 OCR, AI 요리사 Q&A, 맞춤 메뉴 추천 기능을 제공합니다.
+ * @description Gemini 모델을 활용한 레시피 AI 서비스 핵심 비즈니스 로직.
+ * gemini-3.7-flash를 기본 모델로 사용하며, 모델 과부하(503/UNAVAILABLE) 발생 시
+ * Exponential Backoff + Jitter 재시도 및 gemini-3.6-flash 자동 Fallback을 지원합니다.
  * Vercel Serverless Functions(api/ai/*) 및 로컬 Express 서버(server.ts)에서 공통으로 사용됩니다.
- * Vercel 런타임 최적화를 위해 dotenv는 사용하지 않으며 process.env.GEMINI_API_KEY를 직접 참조합니다.
  */
 
 import { GoogleGenAI, Type } from '@google/genai';
+
+type GenerateContentParameters = Parameters<GoogleGenAI['models']['generateContent']>[0];
+type GenerateContentResult = Awaited<ReturnType<GoogleGenAI['models']['generateContent']>>;
 
 /**
  * Gemini 클라이언트 인스턴스 지연(Lazy) 생성 함수
@@ -22,6 +25,62 @@ export function getGeminiClient(): GoogleGenAI {
   return new GoogleGenAI({
     apiKey: apiKey.trim(),
   });
+}
+
+/**
+ * Gemini 3.7 Flash 모델 과부하(503/UNAVAILABLE/High demand/429) 발생 시
+ * 지수 백오프(Exponential Backoff + Jitter)로 재시도하고,
+ * 지속 실패 시 gemini-3.6-flash로 자동 Fallback하는 공통 호출 함수.
+ */
+async function generateWithFallback(
+  ai: GoogleGenAI,
+  request: Omit<GenerateContentParameters, 'model'> & { model?: string }
+): Promise<GenerateContentResult> {
+  const primaryModel = 'gemini-3.7-flash';
+  const fallbackModel = 'gemini-3.6-flash';
+  const delays = [1000, 2000];
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      return await ai.models.generateContent({
+        ...request,
+        model: primaryModel,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const isRetryable =
+        message.includes('503') ||
+        message.includes('UNAVAILABLE') ||
+        message.includes('high demand') ||
+        message.includes('overloaded') ||
+        message.includes('RESOURCE_EXHAUSTED') ||
+        message.includes('429');
+
+      // 400, 401, 403, 404 등 클라이언트/인증 오류는 재시도 없이 즉시 throw
+      if (!isRetryable) {
+        throw error;
+      }
+
+      if (attempt < 2) {
+        console.warn(`Gemini 3.7 Flash overloaded - retry ${attempt + 1}`);
+        const jitter = Math.floor(Math.random() * 400);
+        await new Promise((resolve) => setTimeout(resolve, delays[attempt] + jitter));
+      } else {
+        console.warn(`Gemini 3.7 Flash overloaded - retry 2 failed. Falling back to Gemini 3.6 Flash`);
+      }
+    }
+  }
+
+  console.info(`Falling back to ${fallbackModel}`);
+  try {
+    return await ai.models.generateContent({
+      ...request,
+      model: fallbackModel,
+    });
+  } catch (fallbackError) {
+    console.error(`Falling back to ${fallbackModel} failed:`, fallbackError);
+    throw fallbackError;
+  }
 }
 
 /**
@@ -55,6 +114,42 @@ function safeParseGeminiJson<T>(rawText: string | undefined): T {
     console.error('Gemini JSON parsing error. Raw response preview:', rawText.slice(0, 500), error);
     throw new Error('Gemini 응답 JSON을 해석하지 못했습니다.');
   }
+}
+
+/**
+ * 오류 발생 시 사용자 친화적인 에러 메시지 객체를 반환합니다.
+ * 503/과부하/429 오류는 사용자에게 친절한 안내를 제공하고 원시 에러는 details에만 보관합니다.
+ */
+function formatAiServiceError(
+  error: unknown,
+  defaultMessage: string
+): { error: string; details?: string } {
+  if (error instanceof Error && error.message === 'GEMINI_API_KEY_NOT_CONFIGURED') {
+    return {
+      error: 'AI 서버 설정이 완료되지 않았습니다. GEMINI_API_KEY를 확인해주세요.',
+    };
+  }
+
+  const errString = error instanceof Error ? error.message : String(error);
+  const isOverloadedOrRateLimited =
+    errString.includes('503') ||
+    errString.includes('UNAVAILABLE') ||
+    errString.includes('high demand') ||
+    errString.includes('overloaded') ||
+    errString.includes('RESOURCE_EXHAUSTED') ||
+    errString.includes('429');
+
+  if (isOverloadedOrRateLimited) {
+    return {
+      error: '현재 AI 서버 이용량이 많습니다. 잠시 후 다시 시도해주세요.',
+      details: errString,
+    };
+  }
+
+  return {
+    error: defaultMessage,
+    details: errString,
+  };
 }
 
 /**
@@ -128,8 +223,7 @@ ${sourceContent}
 8. difficulty: '쉬움', '보통', '어려움' 중 하나
 9. tips: 이 요리를 더 맛있게 만들 수 있는 비법이나 주의점 (1~2문장)`;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.7-flash',
+    const response = await generateWithFallback(ai, {
       contents: prompt,
       config: {
         systemInstruction: 'You are an expert Korean chef and culinary data parser.',
@@ -162,16 +256,13 @@ ${sourceContent}
     };
   } catch (error) {
     console.error('Error importing recipe from text/url:', error);
-    if (error instanceof Error && error.message === 'GEMINI_API_KEY_NOT_CONFIGURED') {
-      return {
-        success: false,
-        error: 'AI 서버 설정이 완료되지 않았습니다. GEMINI_API_KEY를 확인해주세요.',
-      };
-    }
+    const errObj = formatAiServiceError(
+      error,
+      '레시피 분석 중 오류가 발생했습니다. 직접 입력하거나 텍스트를 조금 더 자세히 입력해주세요.'
+    );
     return {
       success: false,
-      error: '레시피 분석 중 오류가 발생했습니다. 직접 입력하거나 텍스트를 조금 더 자세히 입력해주세요.',
-      details: error instanceof Error ? error.message : String(error),
+      ...errObj,
     };
   }
 }
@@ -218,8 +309,7 @@ export async function importRecipeFromImage(params: {
 7. 재료(ingredients)는 줄바꿈(\\n)으로 구분된 하나의 문자열로 작성하세요. (예: "돼지고기 150g\\n신김치 1/4포기\\n두부 1/2모")
 8. 조리법(method)은 각 단계를 번호와 줄바꿈(\\n)으로 구분하여 작성하세요.`;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.7-flash',
+    const response = await generateWithFallback(ai, {
       contents: [
         {
           text: prompt,
@@ -315,16 +405,13 @@ export async function importRecipeFromImage(params: {
     };
   } catch (error) {
     console.error('Error importing recipe from image:', error);
-    if (error instanceof Error && error.message === 'GEMINI_API_KEY_NOT_CONFIGURED') {
-      return {
-        success: false,
-        error: 'AI 서버 설정이 완료되지 않았습니다. GEMINI_API_KEY를 확인해주세요.',
-      };
-    }
+    const errObj = formatAiServiceError(
+      error,
+      '사진에서 레시피를 분석하는 중 오류가 발생했습니다. 사진이 선명한지 확인 후 다시 시도해주세요.'
+    );
     return {
       success: false,
-      error: '사진에서 레시피를 분석하는 중 오류가 발생했습니다. 사진이 선명한지 확인 후 다시 시도해주세요.',
-      details: error instanceof Error ? error.message : String(error),
+      ...errObj,
     };
   }
 }
@@ -399,8 +486,7 @@ ${recipe.userNotes ? `- 사용자의 나만의 메모: ${recipe.userNotes}` : ''
 3. 요리하면서 모바일 화면으로 빠르게 읽기 편하도록 핵심 포인트를 2~4개 문단 또는 글머리 기호로 정리해주세요. 불필요하게 장황한 서론이나 사설은 생략하세요.
 4. 특정 레시피 질문인 경우, 해당 레시피의 재료와 조리법 맥락을 최대한 존중하여 조언해주세요.`;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.7-flash',
+    const response = await generateWithFallback(ai, {
       contents: conversationPrompt,
       config: {
         systemInstruction:
@@ -415,16 +501,13 @@ ${recipe.userNotes ? `- 사용자의 나만의 메모: ${recipe.userNotes}` : ''
     };
   } catch (error) {
     console.error('Error asking AI about recipe:', error);
-    if (error instanceof Error && error.message === 'GEMINI_API_KEY_NOT_CONFIGURED') {
-      return {
-        success: false,
-        error: 'AI 서버 설정이 완료되지 않았습니다. GEMINI_API_KEY를 확인해주세요.',
-      };
-    }
+    const errObj = formatAiServiceError(
+      error,
+      'AI 답변 생성 중 문제가 발생했습니다. 잠시 후 다시 시도해주세요.'
+    );
     return {
       success: false,
-      error: 'AI 답변 생성 중 문제가 발생했습니다. 잠시 후 다시 시도해주세요.',
-      details: error instanceof Error ? error.message : String(error),
+      ...errObj,
     };
   }
 }
@@ -476,8 +559,7 @@ ${candidateRecipes.map((r) => `- [ID: ${r.id}] ${r.name} (${r.category}) / 주�
 2. 만약 사용자의 요청(예: "파스타")과 맞는 요리가 저장된 레시피에 전혀 없다면 recommendedRecipeId를 null로 하고 reason에 "현재 저장된 레시피에는 정확히 맞는 음식이 없지만, 가장 가까운 메뉴로 OOO을 추천합니다" 식으로 안내하세요.
 3. 친절하고 입맛 돋우는 셰프 톤으로 2~3줄의 간결한 추천 이유(reason)를 작성하세요.`;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.7-flash',
+    const response = await generateWithFallback(ai, {
       contents: prompt,
       config: {
         responseMimeType: 'application/json',
@@ -506,16 +588,13 @@ ${candidateRecipes.map((r) => `- [ID: ${r.id}] ${r.name} (${r.category}) / 주�
     };
   } catch (error) {
     console.error('Error recommending menu:', error);
-    if (error instanceof Error && error.message === 'GEMINI_API_KEY_NOT_CONFIGURED') {
-      return {
-        success: false,
-        error: 'AI 서버 설정이 완료되지 않았습니다. GEMINI_API_KEY를 확인해주세요.',
-      };
-    }
+    const errObj = formatAiServiceError(
+      error,
+      'AI 메뉴 추천 중 오류가 발생했습니다.'
+    );
     return {
       success: false,
-      error: 'AI 메뉴 추천 중 오류가 발생했습니다.',
-      details: error instanceof Error ? error.message : String(error),
+      ...errObj,
     };
   }
 }

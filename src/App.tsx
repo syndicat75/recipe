@@ -98,6 +98,7 @@ export default function App(): React.JSX.Element {
     syncStatus,
     setSyncStatus,
     loginWithGoogle,
+    loginWithGoogleRedirect,
     logout,
     isOnline,
   } = useFirebaseAuth();
@@ -180,15 +181,30 @@ export default function App(): React.JSX.Element {
 
   /**
    * 전역 토스트 알림 메시지를 표시합니다.
+   * 동일한 message + type 조합의 토스트가 이미 존재하면 중복 추가를 방지하고,
+   * 화면에는 최대 3개까지만 노출합니다.
    */
   const showToast = useCallback((message: string, type: 'success' | 'info' | 'warning' | 'error' = 'info'): void => {
-    logger.info('App.showToast', `토스트 생성: "${message}" (${type})`);
-    const id = Date.now().toString() + Math.random().toString(36).substring(2, 5);
-    setToasts((prev) => [...prev, { id, message, type }]);
+    if (!message || !message.trim()) return;
 
-    setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 3200);
+    setToasts((prev) => {
+      const duplicated = prev.some(
+        (toast) => toast.message === message && toast.type === type
+      );
+
+      if (duplicated) {
+        return prev;
+      }
+
+      const id = Date.now().toString() + Math.random().toString(36).substring(2, 5);
+
+      // 타이머 등록: 중복되지 않고 실제로 추가된 Toast에 대해서만 개별 해제 예약
+      setTimeout(() => {
+        setToasts((current) => current.filter((t) => t.id !== id));
+      }, 3200);
+
+      return [...prev, { id, message, type }].slice(-3);
+    });
   }, []);
 
   /**
@@ -922,13 +938,18 @@ export default function App(): React.JSX.Element {
   }, [user, showToast]);
 
   /**
-   * Google 로그인 시작 핸들러
+   * Google 로그인 시작 핸들러 (기본: signInWithPopup, popup-blocked 시 signInWithRedirect 자동 전환)
    */
   const handleGoogleLogin = useCallback(async () => {
     logger.info('App.handleGoogleLogin', '사용자 Google 로그인 버튼 클릭');
-    const result = await loginWithGoogle((errorMessage: string) => {
-      showToast(errorMessage, 'warning');
-    });
+    const result = await loginWithGoogle(
+      (errorMessage: string) => {
+        showToast(errorMessage, 'warning');
+      },
+      (infoMessage: string) => {
+        showToast(infoMessage, 'info');
+      }
+    );
     if (result) {
       showToast(`👋 ${result.displayName || result.email}님, 환영합니다!`, 'success');
     }

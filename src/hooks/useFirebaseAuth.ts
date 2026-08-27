@@ -8,6 +8,8 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   onAuthStateChanged,
   signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   signOut,
   User,
   AuthError,
@@ -46,7 +48,7 @@ export function getFirebaseAuthErrorMessage(error: unknown): string {
 
   switch (code) {
     case 'auth/popup-blocked':
-      return '브라우저가 Google 로그인 창을 차단했습니다.';
+      return 'Google 로그인 팝업이 차단되었습니다. 브라우저의 팝업 및 리디렉션을 허용한 뒤 다시 로그인해주세요.';
     case 'auth/popup-closed-by-user':
       return 'Google 로그인이 취소되었습니다.';
     case 'auth/unauthorized-domain':
@@ -78,8 +80,13 @@ export interface UseFirebaseAuthReturn {
   syncStatus: SyncStatus;
   /** 동기화 상태 직접 설정 함수 */
   setSyncStatus: (status: SyncStatus) => void;
-  /** Google 로그인 실행 */
-  loginWithGoogle: (onErrorToast?: (msg: string) => void) => Promise<FirebaseAuthUser | null>;
+  /** Google 팝업 로그인 실행 (기본 signInWithPopup, popup-blocked 시 signInWithRedirect 자동 Fallback) */
+  loginWithGoogle: (
+    onErrorToast?: (msg: string) => void,
+    onInfoToast?: (msg: string) => void
+  ) => Promise<FirebaseAuthUser | null>;
+  /** Google 리디렉션 로그인 실행 (팝업 차단 시 사용자 선택 폴백) */
+  loginWithGoogleRedirect: () => Promise<void>;
   /** 로그아웃 실행 */
   logout: () => Promise<void>;
   /** Firebase 환경 준비 여부 */
@@ -128,7 +135,7 @@ export function useFirebaseAuth(): UseFirebaseAuthReturn {
     };
   }, [user]);
 
-  // 2. Firebase Auth 상태 변화 리스너 (onAuthStateChanged를 단일 진실 공급원으로 사용)
+  // 2. Firebase Auth 상태 변화 리스너 및 Redirect 결과 처리
   useEffect(() => {
     if (!auth || !isFirebaseReady) {
       logger.info(
@@ -140,8 +147,30 @@ export function useFirebaseAuth(): UseFirebaseAuthReturn {
       return;
     }
 
-    logger.info('useFirebaseAuth.init', 'Firebase onAuthStateChanged 리스너 등록');
+    logger.info('useFirebaseAuth.init', 'Firebase onAuthStateChanged 및 getRedirectResult 리스너 등록');
 
+    // 앱 초기화 시 getRedirectResult(auth)를 정확히 한 번 처리
+    getRedirectResult(auth)
+      .then((result) => {
+        if (!result) return;
+        const fbUser = result.user;
+        logger.info(
+          'useFirebaseAuth.redirectResult',
+          `리디렉션 로그인 결과 수신: ${fbUser.displayName || fbUser.email} (UID: ${fbUser.uid})`
+        );
+        setUser({
+          uid: fbUser.uid,
+          email: fbUser.email,
+          displayName: fbUser.displayName,
+          photoURL: fbUser.photoURL,
+        });
+        setSyncStatus('synced');
+      })
+      .catch((error) => {
+        console.error('Firebase redirect login error:', error);
+      });
+
+    // onAuthStateChanged는 인증 상태의 최종 진실 공급원으로 유지
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser: User | null) => {
       if (firebaseUser) {
         logger.info(
@@ -169,12 +198,15 @@ export function useFirebaseAuth(): UseFirebaseAuthReturn {
   }, []);
 
   /**
-   * Google 로그인 핸들러
-   * 사용자 클릭 이벤트에서 직접 signInWithPopup을 호출하여
-   * PC Chrome, Android Chrome, 모바일 브라우저 및 PWA 환경에서 일관된 로그인 처리를 수행합니다.
+   * Google 로그인 핸들러 (기본: signInWithPopup, popup-blocked 시 signInWithRedirect 자동 Fallback)
+   * 사용자 클릭 이벤트에서 직접 signInWithPopup을 호출하고
+   * 브라우저 팝업 차단 발생 시 signInWithRedirect로 매끄럽게 자동 전환합니다.
    */
   const loginWithGoogle = useCallback(
-    async (onErrorToast?: (msg: string) => void): Promise<FirebaseAuthUser | null> => {
+    async (
+      onErrorToast?: (msg: string) => void,
+      onInfoToast?: (msg: string) => void
+    ): Promise<FirebaseAuthUser | null> => {
       logger.info('useFirebaseAuth.loginWithGoogle', 'Google 로그인 요청 시작');
 
       if (!auth || !googleProvider) {
@@ -184,7 +216,7 @@ export function useFirebaseAuth(): UseFirebaseAuthReturn {
         return null;
       }
 
-      // 중복 실행 방지 가드
+      // 중복 실행 방지 가드 (Ref 및 State 동시 보호)
       if (isLoggingInRef.current) {
         logger.warn('useFirebaseAuth.loginWithGoogle', '이미 로그인이 진행 중입니다.');
         return null;
@@ -195,7 +227,7 @@ export function useFirebaseAuth(): UseFirebaseAuthReturn {
       setSyncStatus('syncing');
 
       try {
-        // 모든 웹 환경(PC, Android Chrome, 모바일 브라우저, PWA)에서 signInWithPopup 호출
+        // 1. 기본 방식: signInWithPopup 호출
         const userCredential = await signInWithPopup(auth, googleProvider);
         const fbUser = userCredential.user;
 
@@ -230,9 +262,35 @@ export function useFirebaseAuth(): UseFirebaseAuthReturn {
           authErr
         );
 
+        // 1. 브라우저 팝업 차단(auth/popup-blocked) 감지 시 -> 자동 signInWithRedirect Fallback 실행
+        if (authErr?.code === 'auth/popup-blocked') {
+          logger.warn(
+            'useFirebaseAuth.loginWithGoogle',
+            '브라우저 팝업 차단 감지 (auth/popup-blocked) -> signInWithRedirect로 자동 전환'
+          );
+          const redirectNotice = '팝업 로그인이 차단되어 페이지 이동 방식으로 로그인합니다.';
+          if (onInfoToast) {
+            onInfoToast(redirectNotice);
+          } else if (onErrorToast) {
+            onErrorToast(redirectNotice);
+          }
+
+          try {
+            await signInWithRedirect(auth, googleProvider);
+            return null;
+          } catch (redirectErr) {
+            console.error('Firebase signInWithRedirect fallback error:', redirectErr);
+            if (onErrorToast) {
+              onErrorToast(getFirebaseAuthErrorMessage(redirectErr));
+            }
+            setSyncStatus(user ? 'synced' : 'error');
+            return null;
+          }
+        }
+
         const friendlyMessage = getFirebaseAuthErrorMessage(authErr);
 
-        // 사용자가 단순히 창을 닫은 경우(popup-closed-by-user)나 취소인 경우 상태 원상복구
+        // 2. 사용자가 단순히 창을 닫은 경우(popup-closed-by-user)나 취소인 경우 상태 원상복구 (리디렉션 안 함)
         if (
           authErr?.code === 'auth/popup-closed-by-user' ||
           authErr?.code === 'auth/cancelled-popup-request'
@@ -243,7 +301,7 @@ export function useFirebaseAuth(): UseFirebaseAuthReturn {
           return null;
         }
 
-        // auth/unauthorized-domain, auth/popup-blocked, auth/network-request-failed 등 Toast 및 상태 반영
+        // 3. 기타 인증 에러 (unauthorized-domain, network-request-failed 등은 리디렉션하지 않고 알림 표시)
         if (onErrorToast) {
           onErrorToast(friendlyMessage);
         }
@@ -257,6 +315,32 @@ export function useFirebaseAuth(): UseFirebaseAuthReturn {
     },
     [user]
   );
+
+  /**
+   * Google 리디렉션 로그인 핸들러 (팝업 차단 시 사용자 선택 폴백)
+   */
+  const loginWithGoogleRedirect = useCallback(async (): Promise<void> => {
+    logger.info('useFirebaseAuth.loginWithGoogleRedirect', 'Google 리디렉션 로그인 시작');
+    if (!auth || !googleProvider) {
+      logger.error('useFirebaseAuth.loginWithGoogleRedirect', 'Firebase 인증 미설정');
+      return;
+    }
+
+    if (isLoggingInRef.current) return;
+    isLoggingInRef.current = true;
+    setIsLoggingIn(true);
+    setSyncStatus('syncing');
+
+    try {
+      await signInWithRedirect(auth, googleProvider);
+    } catch (err) {
+      console.error('Firebase signInWithRedirect error:', err);
+      logger.error('useFirebaseAuth.loginWithGoogleRedirect', '리디렉션 로그인 실패', err);
+      isLoggingInRef.current = false;
+      setIsLoggingIn(false);
+      setSyncStatus(user ? 'synced' : 'error');
+    }
+  }, [user]);
 
   /**
    * 로그아웃 핸들러
@@ -285,6 +369,7 @@ export function useFirebaseAuth(): UseFirebaseAuthReturn {
     syncStatus,
     setSyncStatus,
     loginWithGoogle,
+    loginWithGoogleRedirect,
     logout,
     isFirebaseAvailable: isFirebaseReady,
     isOnline,
