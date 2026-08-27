@@ -21,6 +21,7 @@
         "isCustom": { "type": "boolean", "description": "Custom recipe flag" },
         "isBookmarked": { "type": "boolean", "description": "Bookmarked flag" },
         "userNotes": { "type": "string", "description": "Notes for recipe" },
+        "syncScope": { "type": "string", "enum": ["public", "private", "local"], "description": "Recipe synchronization scope" },
         "createdAt": { "type": "number", "description": "Creation timestamp" },
         "updatedAt": { "type": "number", "description": "Last updated timestamp" }
       },
@@ -54,6 +55,10 @@
     "/recipes/{recipeId}": {
       "schema": "Recipe",
       "description": "Public recipes viewable by all users and editable by authenticated admin"
+    },
+    "/users/{userId}/recipes/{recipeId}": {
+      "schema": "Recipe",
+      "description": "Private user recipes accessible and editable only by the owning user across all their devices"
     },
     "/users/{userId}/settings/{docId}": {
       "schema": "UserSettings",

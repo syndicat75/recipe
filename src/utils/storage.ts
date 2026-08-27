@@ -62,13 +62,32 @@ export function loadAllRecipes(): Recipe[] {
 /**
  * 전체 레시피 목록을 로컬스토리지에 영구 저장합니다.
  * @param recipes 저장할 전체 레시피 배열
+ * @returns 저장 성공 여부 (boolean)
  */
-export function saveAllRecipes(recipes: Recipe[]): void {
+export function saveAllRecipes(recipes: Recipe[]): boolean {
   logger.info('storage.saveAllRecipes', `전체 레시피 저장 (${recipes.length}개)`);
   try {
-    localStorage.setItem(APP_CONFIG.storageKeys.allRecipes, JSON.stringify(recipes));
-  } catch (error) {
-    logger.error('storage.saveAllRecipes', '레시피 저장 실패', error);
+    const serialized = JSON.stringify(recipes);
+    localStorage.setItem(APP_CONFIG.storageKeys.allRecipes, serialized);
+    return true;
+  } catch (error: any) {
+    const isQuotaExceeded =
+      error &&
+      (error.name === 'QuotaExceededError' ||
+        error.name === 'NS_ERROR_DOM_QUOTA_REACHED' ||
+        error.code === 22 ||
+        error.code === 1014);
+
+    if (isQuotaExceeded) {
+      logger.error(
+        'storage.saveAllRecipes',
+        '로컬스토리지 용량 초과(QuotaExceededError)! 레시피 저장 실패. 브라우저 저장공간이 부족하거나 사진 용량이 너무 큽니다.',
+        error
+      );
+    } else {
+      logger.error('storage.saveAllRecipes', '레시피 저장 실패', error);
+    }
+    return false;
   }
 }
 

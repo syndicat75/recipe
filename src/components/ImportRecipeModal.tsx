@@ -330,9 +330,11 @@ export const ImportRecipeModal: React.FC<ImportRecipeModalProps> = ({
         }
 
         if (result.scope === 'public') {
-          showToast(`'${finalName}' 레시피가 공개 레시피 북에 추가되었습니다!`, 'success');
+          showToast('☁️ 공개 레시피로 저장되었습니다.', 'success');
+        } else if (result.scope === 'private') {
+          showToast('☁️ 내 레시피가 클라우드에 저장되었습니다.\n다른 기기에서도 사용할 수 있습니다.', 'success');
         } else {
-          showToast(`'${finalName}' 레시피가 내 기기에 저장되었습니다!`, 'success');
+          showToast('📱 이 기기에 저장되었습니다.\nGoogle 로그인하면 다른 기기와 동기화할 수 있습니다.', 'info');
         }
       } else {
         showToast(`'${finalName}' 레시피가 추가되었습니다!`, 'success');

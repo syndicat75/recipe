@@ -95,10 +95,10 @@ export const CloudMigrationModal: React.FC<CloudMigrationModalProps> = ({
                   <span className="text-2xl mt-0.5">📱</span>
                   <div>
                     <p className="font-bold text-sm text-stone-900">
-                      이 기기에 저장된 기존 레시피 <span className="text-orange-600 font-black">{localCount}개</span>가 있습니다.
+                      이 기기에 저장된 레시피 <span className="text-orange-600 font-black">{localCount}개</span>가 있습니다.
                     </p>
                     <p className="text-xs text-stone-600 mt-1 leading-relaxed">
-                      Google 계정의 Cloud Firestore에 안전하게 저장하면, PC와 스마트폰 등 다른 모든 기기에서도 실시간으로 동일한 레시피, 즐겨찾기, 메모, 장보기 목록을 사용하실 수 있습니다.
+                      클라우드에 동기화하시겠습니까? 내 계정 전용 클라우드(개인 보관함)에 안전하게 저장되어 스마트폰과 PC 등 모든 기기에서 동일하게 확인하고 편집할 수 있습니다.
                     </p>
                   </div>
                 </div>

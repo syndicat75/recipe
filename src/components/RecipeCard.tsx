@@ -170,7 +170,17 @@ export const RecipeCard: React.FC<RecipeCardProps> = ({
                   <span>{recipe.difficulty}</span>
                 </span>
               )}
-              {recipe.isCustom && (
+              {recipe.syncScope === 'private' && (
+                <span className="rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-bold text-violet-700" title="내 계정에 동기화된 개인 레시피">
+                  ☁️ 개인
+                </span>
+              )}
+              {recipe.syncScope === 'local' && (
+                <span className="rounded bg-stone-100 px-1.5 py-0.5 text-[10px] font-bold text-stone-600" title="현재 기기에만 저장된 레시피">
+                  📱 로컬
+                </span>
+              )}
+              {recipe.isCustom && recipe.syncScope !== 'local' && recipe.syncScope !== 'private' && (
                 <span className="rounded bg-orange-100 px-1.5 py-0.5 text-[10px] font-bold text-orange-700">
                   직접등록
                 </span>

@@ -47,6 +47,9 @@ import {
   savePublicRecipe,
   deletePublicRecipe,
   publishAllRecipesToPublic,
+  subscribeToUserRecipes,
+  savePrivateRecipe,
+  deletePrivateRecipe,
   subscribeToUserSettings,
   subscribeToUserShopping,
   saveBookmarksToCloud,
@@ -56,8 +59,8 @@ import {
   syncAllShoppingItemsToCloud,
   fetchCloudSummary,
   migrateLocalDataToCloud,
-  mergeRecipeLists,
 } from './services/firestoreSync';
+import { mergeThreeTiers } from './utils/recipeMerger';
 import { MigrationModalState } from './types/firebase';
 
 // Sub Components
@@ -106,11 +109,20 @@ export default function App(): React.JSX.Element {
     isOnline,
   } = useFirebaseAuth();
 
-  // 관리자 여부 판별 (VITE_ADMIN_UID와 현재 로그인 UID 비교)
-  const isAdmin = useMemo(() => isUserAdmin(user?.uid), [user?.uid]);
+  // 관리자 여부 판별 (VITE_ADMIN_UID, VITE_ADMIN_EMAIL과 현재 로그인 계정 비교)
+  const isAdmin = useMemo(() => isUserAdmin(user?.uid, user?.email), [user?.uid, user?.email]);
 
   // 1. Core Data State
   const [recipes, setRecipes] = useState<Recipe[]>([]);
+  const [publicRecipes, setPublicRecipes] = useState<Recipe[]>([]);
+  const [privateRecipes, setPrivateRecipes] = useState<Recipe[]>([]);
+  const publicRecipesRef = React.useRef<Recipe[]>([]);
+  const privateRecipesRef = React.useRef<Recipe[]>([]);
+
+  // ref 동기화
+  publicRecipesRef.current = publicRecipes;
+  privateRecipesRef.current = privateRecipes;
+
   const [bookmarkedIds, setBookmarkedIds] = useState<number[]>([]);
   const [shoppingList, setShoppingList] = useState<ShoppingItem[]>([]);
   const [userNotes, setUserNotes] = useState<Record<number, string>>({});
@@ -349,12 +361,20 @@ export default function App(): React.JSX.Element {
   useEffect(() => {
     logger.info('App.publicSync', '공개 레시피(/recipes) 실시간 리스너 등록');
     const unsub = subscribeToPublicRecipes(
-      (publicRecipes) => {
-        logger.info('App.publicSync', `공개 레시피 수신: ${publicRecipes.length}개`);
-        if (publicRecipes.length > 0) {
-          setRecipes(publicRecipes);
-          saveAllRecipes(publicRecipes);
-        }
+      (incomingPublic) => {
+        logger.info('App.publicSync', `공개 레시피 수신: ${incomingPublic.length}개`);
+        setPublicRecipes(incomingPublic);
+        publicRecipesRef.current = incomingPublic;
+
+        const currentLocal = loadAllRecipes().filter((r) => r.syncScope === 'local');
+        const merged = mergeThreeTiers(
+          incomingPublic,
+          privateRecipesRef.current,
+          currentLocal
+        );
+
+        setRecipes(merged);
+        saveAllRecipes(merged);
       },
       (err) => {
         logger.warn('App.publicSync', '공개 레시피 구독 에러 (로컬 캐시 레시피 유지)', err);
@@ -365,26 +385,42 @@ export default function App(): React.JSX.Element {
     };
   }, []);
 
-  // 2. 로그인 사용자 개인 데이터(북마크, 메모, 장보기) 및 관리자 배포 검사
+  // 2. 로그인 사용자 개인 데이터(개인 레시피, 북마크, 메모, 장보기) 실시간 동기화
   useEffect(() => {
     if (!user) {
       logger.info('App.authSync', '게스트/로그아웃 상태: 로컬 데이터 모드 유지');
+      setPrivateRecipes([]);
+      privateRecipesRef.current = [];
       return;
     }
 
     logger.info('App.authSync', `로그인 사용자 동기화 연결: ${user.email} (UID: ${user.uid}, 관리자: ${isAdmin})`);
     setSyncStatus('syncing');
 
+    // 일반 사용자: 로컬 레시피가 있고 아직 마이그레이션 안내 안 봤으면 동기화 제안
+    const migrationStorageKey = `my_recipe_migrated_${user.uid}`;
+    const isAlreadyMigrated = localStorage.getItem(migrationStorageKey) === 'true';
+    const currentLocalOnly = loadAllRecipes().filter((r) => r.syncScope === 'local');
+
+    if (!isAlreadyMigrated && currentLocalOnly.length > 0) {
+      setMigrationModal({
+        isOpen: true,
+        mode: 'initial',
+        localRecipeCount: currentLocalOnly.length,
+        cloudRecipeCount: 0,
+        isMigrating: false,
+      });
+    }
+
     // 관리자 로그인 시 클라우드 공개 레시피가 0개이면 로컬 레시피 최초 게시 제안
     if (isAdmin) {
-      const migrationStorageKey = `my_recipe_admin_migrated_${user.uid}`;
-      const isAlreadyMigrated = localStorage.getItem(migrationStorageKey) === 'true';
-
+      const adminMigrationKey = `my_recipe_admin_migrated_${user.uid}`;
+      const isAdminMigrated = localStorage.getItem(adminMigrationKey) === 'true';
       fetchPublicRecipeCount()
         .then((pubCount) => {
           logger.info('App.authSync', `공개 레시피 통계: ${pubCount}개`);
           const currentLocal = loadAllRecipes();
-          if (!isAlreadyMigrated && pubCount === 0 && currentLocal.length > 0) {
+          if (!isAdminMigrated && pubCount === 0 && currentLocal.length > 0) {
             setMigrationModal({
               isOpen: true,
               mode: 'initial',
@@ -398,6 +434,31 @@ export default function App(): React.JSX.Element {
           logger.error('App.authSync', '공개 레시피 개수 조회 실패', err);
         });
     }
+
+    // 사용자 개인 레시피 실시간 구독 (/users/{uid}/recipes)
+    const unsubUserRecipes = subscribeToUserRecipes(
+      user.uid,
+      (incomingPrivate) => {
+        logger.info('App.authSync', `실시간 개인 레시피 수신: ${incomingPrivate.length}개`);
+        setPrivateRecipes(incomingPrivate);
+        privateRecipesRef.current = incomingPrivate;
+
+        const currentLocal = loadAllRecipes().filter((r) => r.syncScope === 'local');
+        const merged = mergeThreeTiers(
+          publicRecipesRef.current,
+          incomingPrivate,
+          currentLocal
+        );
+
+        setRecipes(merged);
+        saveAllRecipes(merged);
+        setSyncStatus('synced');
+      },
+      (err) => {
+        logger.error('App.authSync', '개인 레시피 구독 에러', err);
+        setSyncStatus('error');
+      }
+    );
 
     // 사용자 개인 설정(즐겨찾기, 메모) 리스너
     const unsubSettings = subscribeToUserSettings(
@@ -430,6 +491,7 @@ export default function App(): React.JSX.Element {
 
     return () => {
       logger.info('App.authSync', '사용자 개인 데이터 리스너 해제');
+      unsubUserRecipes();
       unsubSettings();
       unsubShopping();
     };
@@ -517,7 +579,7 @@ export default function App(): React.JSX.Element {
   }, []);
 
   /**
-   * 레시피 등록 또는 수정 저장 핸들러 (관리자: 공개 레시피 북, 일반 사용자: 로컬 저장소 영속화)
+   * 레시피 등록 또는 수정 저장 핸들러 (3단계: 관리자 -> public, 로그인 사용자 -> private, 게스트 -> local)
    */
   const handleSaveRecipe = useCallback(
     async (
@@ -527,11 +589,38 @@ export default function App(): React.JSX.Element {
     ): Promise<SaveRecipeResult> => {
       logger.info(
         'App.handleSaveRecipe',
-        `레시피 저장 시도: ${recipeData.name} (ID: ${recipeData.id}, 관리자: ${isAdmin})`
+        `레시피 저장 시도: ${recipeData.name} (ID: ${recipeData.id}, isAdmin: ${isAdmin}, user: ${user?.email || 'none'})`
       );
 
-      const isPublicTarget = isAdmin && (recipeData.syncScope === 'public' || !recipeData.syncScope);
-      const effectiveScope: 'public' | 'local' = isPublicTarget ? 'public' : 'local';
+      // 1. effectiveScope 결정 및 권한 검증
+      let effectiveScope: 'public' | 'private' | 'local';
+
+      if (isAdmin) {
+        // 관리자는 공개 레시피로 저장
+        effectiveScope = 'public';
+      } else if (user) {
+        // 비관리자가 공개(public) 레시피를 수정하려 시도하는 경우 차단
+        if (recipeData.syncScope === 'public') {
+          logger.warn('App.handleSaveRecipe', '비관리자의 공개 레시피 수정 시도 차단');
+          showToast('🔒 공개 레시피는 관리자만 수정할 수 있습니다.', 'warning');
+          return {
+            success: false,
+            error: '공개 레시피는 관리자만 수정할 수 있습니다.',
+          };
+        }
+        // 로그인된 일반 사용자는 본인 전용 클라우드(private)로 저장
+        effectiveScope = 'private';
+      } else {
+        // 비로그인 게스트 사용자
+        if (recipeData.syncScope === 'public') {
+          showToast('🔒 공개 레시피는 관리자만 수정할 수 있습니다.', 'warning');
+          return {
+            success: false,
+            error: '공개 레시피는 관리자만 수정할 수 있습니다.',
+          };
+        }
+        effectiveScope = 'local';
+      }
 
       const normalizedRecipe: Recipe = {
         ...recipeData,
@@ -539,21 +628,78 @@ export default function App(): React.JSX.Element {
         updatedAt: Date.now(),
       };
 
-      // 1. 로컬 상태 업데이트 및 localStorage 영속화
-      setRecipes((prev) => {
-        const existingIdx = prev.findIndex((r) => r.id === normalizedRecipe.id);
-        let next: Recipe[];
-        if (existingIdx >= 0) {
-          next = [...prev];
-          next[existingIdx] = normalizedRecipe;
-        } else {
-          next = [normalizedRecipe, ...prev];
+      // 2. Firestore 대상인 경우 먼저 클라우드 저장 시도 (성공하기 전에는 성공 메시지/상태 불허)
+      if (effectiveScope === 'public') {
+        try {
+          await savePublicRecipe(normalizedRecipe);
+          const nextPub = [
+            normalizedRecipe,
+            ...publicRecipesRef.current.filter((r) => r.id !== normalizedRecipe.id),
+          ];
+          setPublicRecipes(nextPub);
+          publicRecipesRef.current = nextPub;
+        } catch (err) {
+          logger.error('App.handleSaveRecipe', '공개 레시피 클라우드 저장 실패', err);
+          showToast('공개 레시피 클라우드 저장에 실패했습니다. 네트워크 상태를 확인해주세요.', 'error');
+          return {
+            success: false,
+            error: '공개 레시피 클라우드 저장에 실패했습니다.',
+          };
         }
-        saveAllRecipes(next);
-        return next;
-      });
+      } else if (effectiveScope === 'private') {
+        try {
+          await savePrivateRecipe(user!.uid, normalizedRecipe);
+          const nextPriv = [
+            normalizedRecipe,
+            ...privateRecipesRef.current.filter((r) => r.id !== normalizedRecipe.id),
+          ];
+          setPrivateRecipes(nextPriv);
+          privateRecipesRef.current = nextPriv;
+        } catch (err) {
+          logger.error('App.handleSaveRecipe', '개인 레시피 클라우드 저장 실패', err);
+          showToast('클라우드 저장에 실패했습니다. 잠시 후 다시 시도해주세요.', 'error');
+          return {
+            success: false,
+            error: '클라우드 저장에 실패했습니다. 잠시 후 다시 시도해주세요.',
+          };
+        }
+      }
 
-      // 2. 북마크 상태 반영
+      // 3. 로컬 저장소 및 3-tier 상태 병합 반영
+      const currentLocal = loadAllRecipes().filter((r) => r.syncScope === 'local');
+      let nextLocal = currentLocal;
+
+      if (effectiveScope === 'local') {
+        const existingIdx = currentLocal.findIndex((r) => r.id === normalizedRecipe.id);
+        if (existingIdx >= 0) {
+          nextLocal = [...currentLocal];
+          nextLocal[existingIdx] = normalizedRecipe;
+        } else {
+          nextLocal = [normalizedRecipe, ...currentLocal];
+        }
+      } else {
+        // private 또는 public으로 저장된 경우, 기존 로컬에 동일 id가 있었다면 제거
+        nextLocal = currentLocal.filter((r) => r.id !== normalizedRecipe.id);
+      }
+
+      const merged = mergeThreeTiers(
+        publicRecipesRef.current,
+        privateRecipesRef.current,
+        nextLocal
+      );
+
+      setRecipes(merged);
+      const localSaveSuccess = saveAllRecipes(merged);
+
+      if (!localSaveSuccess && effectiveScope === 'local') {
+        logger.error('App.handleSaveRecipe', '로컬 저장공간 부족');
+        return {
+          success: false,
+          error: '기기 저장공간이 부족하여 레시피를 저장하지 못했습니다.',
+        };
+      }
+
+      // 4. 북마크 상태 반영
       let nextBookmarks: number[] = bookmarkedIds;
       setBookmarkedIds((prev) => {
         const has = prev.includes(normalizedRecipe.id);
@@ -568,7 +714,7 @@ export default function App(): React.JSX.Element {
         return next;
       });
 
-      // 3. 사용자 메모 저장
+      // 5. 사용자 메모 저장
       let nextNotes: Record<number, string> = userNotes;
       if (userNote !== undefined) {
         setUserNotes((prev) => {
@@ -579,18 +725,7 @@ export default function App(): React.JSX.Element {
         });
       }
 
-      // 4. 관리자: 공개 컬렉션 (/recipes) 실시간 동기화
-      if (isPublicTarget) {
-        try {
-          await savePublicRecipe(normalizedRecipe);
-        } catch (err) {
-          logger.error('App.handleSaveRecipe', '공개 레시피 클라우드 저장 실패', err);
-          showToast('클라우드 동기화 중 일시적 오류가 발생하여 내 기기에 임시 보관되었습니다.', 'warning');
-          return { success: true, scope: 'local' };
-        }
-      }
-
-      // 5. 로그인 사용자: 개인 북마크 & 메모 동기화
+      // 6. 로그인 사용자 설정 동기화
       if (user) {
         saveBookmarksToCloud(user.uid, nextBookmarks).catch((err) => {
           logger.error('App.handleSaveRecipe', '클라우드 북마크 동기화 실패', err);
@@ -698,36 +833,68 @@ export default function App(): React.JSX.Element {
   );
 
   /**
-   * 레시피 삭제 요청 (관리자: 공개 레시피 삭제, 일반 사용자: 로컬 레시피 삭제)
+   * 레시피 삭제 요청 (3단계: public -> 관리자만, private -> 본인 클라우드 삭제, local -> 로컬 삭제)
    */
   const handleDeleteRecipeRequest = useCallback(
     (recipeId: number): void => {
       const target = recipes.find((r) => r.id === recipeId);
       if (!target) return;
 
-      const isPublicTarget = target.syncScope === 'public';
-      if (!isAdmin && isPublicTarget) {
+      const targetScope = target.syncScope || (target.isCustom ? 'local' : 'public');
+
+      if (targetScope === 'public' && !isAdmin) {
         showToast('🔒 공개 공식 레시피 삭제는 관리자만 가능합니다.', 'warning');
         return;
       }
 
-      const isPublicDelete = isAdmin && isPublicTarget;
+      let deleteConfirmMessage = `'${target.name}' 레시피를 내 기기에서 삭제하시겠습니까?`;
+      if (targetScope === 'public') {
+        deleteConfirmMessage = `'${target.name}' 레시피를 정말 삭제하시겠습니까? 삭제된 레시피는 공개 목록에서 영구히 제거됩니다.`;
+      } else if (targetScope === 'private') {
+        deleteConfirmMessage = `'${target.name}' 레시피를 클라우드 및 모든 동기화 기기에서 삭제하시겠습니까?`;
+      }
 
       setConfirmDialog({
         isOpen: true,
         title: '레시피 삭제',
-        message: isPublicDelete
-          ? `'${target.name}' 레시피를 정말 삭제하시겠습니까? 삭제된 레시피는 공개 목록에서 영구히 제거됩니다.`
-          : `'${target.name}' 레시피를 내 기기에서 삭제하시겠습니까?`,
+        message: deleteConfirmMessage,
         confirmText: '삭제',
         isDestructive: true,
-        onConfirm: () => {
-          logger.info('App.handleDeleteRecipe', `레시피 삭제 확정: ID ${recipeId}`);
+        onConfirm: async () => {
+          logger.info('App.handleDeleteRecipe', `레시피 삭제 확정: ID ${recipeId} (Scope: ${targetScope})`);
+
+          // 1. 클라우드 삭제 분기
+          if (targetScope === 'public' && isAdmin) {
+            try {
+              await deletePublicRecipe(recipeId);
+              const nextPub = publicRecipesRef.current.filter((r) => r.id !== recipeId);
+              setPublicRecipes(nextPub);
+              publicRecipesRef.current = nextPub;
+            } catch (err) {
+              logger.error('App.handleDeleteRecipe', '공개 레시피 삭제 실패', err);
+              showToast('공개 레시피 삭제 중 오류가 발생했습니다.', 'error');
+              return;
+            }
+          } else if (targetScope === 'private' && user) {
+            try {
+              await deletePrivateRecipe(user.uid, recipeId);
+              const nextPriv = privateRecipesRef.current.filter((r) => r.id !== recipeId);
+              setPrivateRecipes(nextPriv);
+              privateRecipesRef.current = nextPriv;
+            } catch (err) {
+              logger.error('App.handleDeleteRecipe', '개인 레시피 삭제 실패', err);
+              showToast('클라우드 레시피 삭제 중 오류가 발생했습니다.', 'error');
+              return;
+            }
+          }
+
+          // 2. 로컬 상태 및 localStorage 반영
           setRecipes((prev) => {
             const next = prev.filter((r) => r.id !== recipeId);
             saveAllRecipes(next);
             return next;
           });
+
           setBookmarkedIds((prev) => {
             const next = prev.filter((id) => id !== recipeId);
             saveBookmarks(next);
@@ -736,12 +903,6 @@ export default function App(): React.JSX.Element {
             }
             return next;
           });
-
-          if (isPublicDelete) {
-            deletePublicRecipe(recipeId).catch((err) => {
-              logger.error('App.handleDeleteRecipe', '공개 레시피 삭제 실패', err);
-            });
-          }
 
           setSelectedRecipe(null);
           setRecipeToEdit(null);
@@ -905,13 +1066,13 @@ export default function App(): React.JSX.Element {
   );
 
   /**
-   * 클라우드 마이그레이션: 로컬 데이터 업로드
+   * 클라우드 마이그레이션: 로컬 데이터 업로드 (일반 사용자: users/{uid}/recipes 로 동기화)
    */
   const handleUploadLocalToCloud = useCallback(async () => {
     if (!user) return;
     setMigrationModal((prev) => ({ ...prev, isMigrating: true }));
     try {
-      const currentLocal = loadAllRecipes();
+      const currentLocal = loadAllRecipes().filter((r) => r.syncScope === 'local');
       const currentBookmarks = getSavedBookmarks();
       const currentNotes = getSavedRecipeNotes();
       const currentShopping = getSavedShoppingList();
@@ -928,10 +1089,39 @@ export default function App(): React.JSX.Element {
         await publishAllRecipesToPublic(currentLocal);
       }
 
+      // 업로드된 로컬 레시피들을 private로 전환
+      const promotedRecipes: Recipe[] = currentLocal.map((r) => ({
+        ...r,
+        syncScope: (isAdmin ? 'public' : 'private') as 'public' | 'private',
+        updatedAt: Date.now(),
+      }));
+
+      if (isAdmin) {
+        const nextPub = [...publicRecipesRef.current, ...promotedRecipes];
+        setPublicRecipes(nextPub);
+        publicRecipesRef.current = nextPub;
+      } else {
+        const nextPriv = [...privateRecipesRef.current, ...promotedRecipes];
+        setPrivateRecipes(nextPriv);
+        privateRecipesRef.current = nextPriv;
+      }
+
+      // 로컬 전용 레시피는 비우고 전체 병합
+      const merged = mergeThreeTiers(
+        publicRecipesRef.current,
+        privateRecipesRef.current,
+        []
+      );
+
+      setRecipes(merged);
+      saveAllRecipes(merged);
+
       localStorage.setItem(`my_recipe_migrated_${user.uid}`, 'true');
-      localStorage.setItem(`my_recipe_admin_migrated_${user.uid}`, 'true');
+      if (isAdmin) {
+        localStorage.setItem(`my_recipe_admin_migrated_${user.uid}`, 'true');
+      }
       setMigrationModal((prev) => ({ ...prev, isOpen: false, isMigrating: false }));
-      showToast(`🎉 ${currentLocal.length}개 레시피가 클라우드로 안전하게 업로드되었습니다!`, 'success');
+      showToast(`🎉 ${currentLocal.length}개 레시피가 클라우드로 안전하게 동기화되었습니다!`, 'success');
       setSyncStatus('synced');
     } catch (err) {
       logger.error('App.handleUploadLocalToCloud', '클라우드 업로드 실패', err);
@@ -947,15 +1137,21 @@ export default function App(): React.JSX.Element {
     if (!user) return;
     setMigrationModal((prev) => ({ ...prev, isMigrating: true }));
     try {
-      const currentLocal = loadAllRecipes();
+      const currentLocal = loadAllRecipes().filter((r) => r.syncScope === 'local');
       const currentBookmarks = getSavedBookmarks();
       const currentNotes = getSavedRecipeNotes();
       const currentShopping = getSavedShoppingList();
 
-      const merged = mergeRecipeLists(currentLocal, recipes);
+      const merged = mergeThreeTiers(
+        publicRecipesRef.current,
+        privateRecipesRef.current,
+        currentLocal
+      );
+
+      const recipesToSync = merged.filter((r) => r.syncScope !== 'public');
       await migrateLocalDataToCloud(
         user.uid,
-        merged,
+        recipesToSync,
         currentBookmarks,
         currentNotes,
         currentShopping
@@ -968,7 +1164,9 @@ export default function App(): React.JSX.Element {
       setRecipes(merged);
       saveAllRecipes(merged);
       localStorage.setItem(`my_recipe_migrated_${user.uid}`, 'true');
-      localStorage.setItem(`my_recipe_admin_migrated_${user.uid}`, 'true');
+      if (isAdmin) {
+        localStorage.setItem(`my_recipe_admin_migrated_${user.uid}`, 'true');
+      }
       setMigrationModal((prev) => ({ ...prev, isOpen: false, isMigrating: false }));
       showToast(`🎉 기기간 ${merged.length}개의 레시피가 성공적으로 병합되었습니다!`, 'success');
       setSyncStatus('synced');
@@ -977,7 +1175,7 @@ export default function App(): React.JSX.Element {
       showToast('레시피 병합 중 오류가 발생했습니다.', 'error');
       setMigrationModal((prev) => ({ ...prev, isMigrating: false }));
     }
-  }, [user, isAdmin, recipes, showToast, setSyncStatus]);
+  }, [user, isAdmin, showToast, setSyncStatus]);
 
   /**
    * 클라우드 마이그레이션: 클라우드 데이터 우선 사용
@@ -988,6 +1186,27 @@ export default function App(): React.JSX.Element {
     setMigrationModal((prev) => ({ ...prev, isOpen: false, isMigrating: false }));
     showToast('☁️ 클라우드에 저장된 레시피를 사용합니다.', 'info');
   }, [user, showToast]);
+
+  /**
+   * 로그아웃 핸들러 (private 레시피 즉시 제거 및 public + local 레시피만 유지)
+   */
+  const handleLogout = useCallback(() => {
+    logger.info('App.handleLogout', '사용자 로그아웃 수행');
+    logout();
+
+    // 1. private 레시피 상태 즉시 초기화
+    setPrivateRecipes([]);
+    privateRecipesRef.current = [];
+
+    // 2. localStorage 및 recipes 상태에서 private 레시피 제거하고 public + local만 유지
+    const currentLocal = loadAllRecipes().filter((r) => r.syncScope === 'local');
+    const merged = mergeThreeTiers(publicRecipesRef.current, [], currentLocal);
+
+    setRecipes(merged);
+    saveAllRecipes(merged);
+
+    showToast('로그아웃되었습니다. 로컬 모드로 전환됩니다.', 'info');
+  }, [logout, showToast]);
 
   /**
    * Google 로그인 시작 핸들러 (기본: signInWithPopup, popup-blocked 시 signInWithRedirect 자동 전환)
@@ -1237,10 +1456,7 @@ export default function App(): React.JSX.Element {
         syncStatus={syncStatus}
         isLoggingIn={isLoggingIn}
         onLogin={handleGoogleLogin}
-        onLogout={() => {
-          logout();
-          showToast('로그아웃되었습니다. 로컬 모드로 전환됩니다.', 'info');
-        }}
+        onLogout={handleLogout}
         onOpenCloudSyncModal={handleManualOpenCloudSyncModal}
       />
 

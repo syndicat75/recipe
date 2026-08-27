@@ -120,7 +120,7 @@ export const RecipeFormModal: React.FC<RecipeFormModalProps> = ({
   if (!isOpen) return null;
 
   /**
-   * 사진 파일 업로드 및 Base64 변환 핸들러
+   * 사진 파일 업로드 및 클라이언트 사이드 압축/Base64 변환 핸들러
    * @param e 파일 인풋 변경 이벤트
    */
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>): void => {
@@ -129,16 +129,50 @@ export const RecipeFormModal: React.FC<RecipeFormModalProps> = ({
 
     logger.info('RecipeFormModal.handleFileUpload', `이미지 파일 선택: ${file.name} (${file.size} bytes)`);
 
-    if (file.size > 2 * 1024 * 1024) {
-      showToast('⚠️ 이미지 파일 크기는 2MB 이하로 올려주세요.', 'warning');
+    if (file.size > 5 * 1024 * 1024) {
+      showToast('⚠️ 원본 파일 크기는 5MB 이하로 올려주세요.', 'warning');
       return;
     }
 
     const reader = new FileReader();
     reader.onload = () => {
       if (typeof reader.result === 'string') {
-        setImageUrl(reader.result);
-        showToast('📷 사진이 첨부되었습니다.', 'info');
+        const img = new Image();
+        img.onload = () => {
+          // 최대 가로/세로 800px로 리사이징하여 로컬스토리지 용량(5MB 제한) 보호
+          const maxDim = 800;
+          let width = img.width;
+          let height = img.height;
+
+          if (width > maxDim || height > maxDim) {
+            if (width > height) {
+              height = Math.round((height * maxDim) / width);
+              width = maxDim;
+            } else {
+              width = Math.round((width * maxDim) / height);
+              height = maxDim;
+            }
+          }
+
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(img, 0, 0, width, height);
+            const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.82);
+            setImageUrl(compressedDataUrl);
+            showToast('📷 사진이 최적화되어 첨부되었습니다.', 'info');
+          } else {
+            setImageUrl(reader.result as string);
+            showToast('📷 사진이 첨부되었습니다.', 'info');
+          }
+        };
+        img.onerror = () => {
+          setImageUrl(reader.result as string);
+          showToast('📷 사진이 첨부되었습니다.', 'info');
+        };
+        img.src = reader.result;
       }
     };
     reader.onerror = () => {
@@ -216,19 +250,11 @@ export const RecipeFormModal: React.FC<RecipeFormModalProps> = ({
         }
 
         if (result.scope === 'public') {
-          showToast(
-            isEditMode
-              ? `✨ '${recipeData.name}' 레시피가 수정되어 공개 레시피 북에 반영되었습니다.`
-              : `🎉 '${recipeData.name}' 레시피가 공개 레시피 북에 등록되었습니다!`,
-            'success'
-          );
+          showToast('☁️ 공개 레시피로 저장되었습니다.', 'success');
+        } else if (result.scope === 'private') {
+          showToast('☁️ 내 레시피가 클라우드에 저장되었습니다.\n다른 기기에서도 사용할 수 있습니다.', 'success');
         } else {
-          showToast(
-            isEditMode
-              ? `✨ '${recipeData.name}' 레시피가 내 기기에 수정되었습니다.`
-              : `🎉 '${recipeData.name}' 레시피가 내 기기에 저장되었습니다!`,
-            'success'
-          );
+          showToast('📱 이 기기에 저장되었습니다.\nGoogle 로그인하면 다른 기기와 동기화할 수 있습니다.', 'info');
         }
       } else {
         showToast(

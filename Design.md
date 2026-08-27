@@ -163,7 +163,39 @@
 
 ## 4. 데이터 영속성, 클라우드 동기화 및 보안 (Data Persistence & Cloud Sync)
 
-### 4.1 Firebase Authentication & Cloud Firestore (다기기 실시간 동기화)
+### 4.1 3단계 저장 아키텍처 (3-Tier Storage Architecture)
+기존의 단일/이원 저장 구조로 인한 데이터 덮어쓰기 손실 및 기기간 동기화 불일치를 원천 해결하기 위해, 다음과 같은 **엄격한 3단계 저장 및 동기화 모델**을 구축하였습니다:
+
+| 구분 (Scope) | 저장 위치 | 대상 사용자 | 권한 및 특징 |
+| :--- | :--- | :--- | :--- |
+| **`public`** (공개) | Firestore `/recipes` | 모든 방문자 | 관리자(`isAdmin`)만 등록/수정/삭제 가능. 모든 사용자에게 실시간 동기화. |
+| **`private`** (개인) | Firestore `/users/{uid}/recipes` | 로그인 사용자 | 로그인한 본인만 읽기/쓰기 가능 (`request.auth.uid == userId`). 본인의 모든 기기에서 실시간 동기화. |
+| **`local`** (기기 전용) | 브라우저 `localStorage` | 비로그인 게스트 | 현재 기기에만 안전하게 보관. 로그인 후 클라우드 마이그레이션을 통해 `private`로 원클릭 승격 가능. |
+
+#### 4.1.1 3단계 실시간 스냅샷 병합 원칙 (`recipeMerger.ts`)
+화면에 렌더링되는 전체 레시피 목록은 `mergeThreeTiers(publicList, privateList, localList)` 함수를 통해 통합됩니다:
+1. **절대 덮어쓰기 금지**: Firestore 공개 레시피 스냅샷 수신 시 로컬/개인 레시피를 절대 replace하지 않고 3-tier 병합 실행.
+2. **우선순위 계층**:
+   - `private` 레시피는 동일 ID의 `public` 레시피보다 우선.
+   - `local` 레시피는 동일 ID의 `public` 레시피보다 우선.
+   - `private`와 `local` 충돌 시 `updatedAt`이 최신인 레시피 우선.
+3. **로그아웃 격리**: 사용자가 로그아웃하면 `users/{uid}/recipes` 리스너를 해제하고, `private` 레시피를 화면 및 로컬스토리지에서 즉시 제거하여 타 사용자 정보 노출을 차단하며 `public` 및 `local` 레시피만 보존.
+
+#### 4.1.2 저장 및 삭제 흐름 정책
+1. **저장 정책 (`handleSaveRecipe`)**:
+   - 관리자(`isAdmin`): `/recipes` (public) 저장
+   - 로그인 일반 사용자(`user`): `/users/{uid}/recipes` (private) 저장
+   - 비로그인 게스트: `localStorage` (local) 저장
+   - **클라우드 선행 저장 원칙**: Firestore 대상일 경우 클라우드에 성공적으로 기록되기 전까지 성공 Toast 및 상태 변경을 유보하여 데이터 일관성 보장. 비관리자의 `public` 레시피 수정/삭제 시도는 차단.
+2. **삭제 정책 (`handleDeleteRecipeRequest`)**:
+   - `public`: 관리자만 `deletePublicRecipe()` 호출
+   - `private`: 본인만 `deletePrivateRecipe(user.uid, id)` 호출
+   - `local`: 기기 `localStorage`에서만 삭제
+3. **마이그레이션 정책 (`migrateLocalDataToCloud`)**:
+   - 일반 사용자의 로컬 레시피는 반드시 `users/{uid}/recipes`로만 배치(batch) 업로드하여 `private`로 전환.
+   - 대용량 데이터 시 Firestore 500개 쓰기 제한을 방어하기 위해 400개 단위 청크 배치 분할 적용.
+
+### 4.2 Firebase Authentication & Cloud Firestore
 - **Firebase 전용 Named App 격리 (`firebase.ts`)**:
   - `FIREBASE_APP_NAME = 'my-recipe-client'`를 사용하여 기본 `[DEFAULT]` 인스턴스와 격리된 `my-recipe-1569b` 공식 설정을 단일 Source of Truth로 유지.
   - 앱 시작 시 실제 `firebaseApp.options` 및 Identity Toolkit API 기반 Authorized Domains 진단 로깅 자동 실행.
@@ -173,21 +205,18 @@
   - 로그인 성공 시 `[Firebase.auth] popup completed` 진단 로그 (UID, 마스킹 이메일, `auth.currentUser`) 출력.
   - 로그인 중복 클릭 방지(`isLoggingIn` 상태 및 버튼 disabled), `finally`에서 로딩 상태 완벽 복구, 에러 코드별 명확한 한국어 Toast 안내.
   - 로그인 성공 시 사용자 프로필(사진, 이름, 이메일) 헤더 반영 및 클라우드 동기화 자동 시작.
-  - 로그아웃 시 로컬 데이터 모드로 안전하게 전환하며 기존 데이터는 손실 없이 보존.
 - **Firestore 다중 탭 및 오프라인 영속성 (`firebase.ts`)**:
   - `persistentLocalCache` + `persistentMultipleTabManager`를 적용하여 네트워크가 끊겨도 로컬 캐시에서 즉시 동작하고 재연결 시 자동 동기화.
 - **PWA Service Worker (`public/sw.js`)**:
   - `my-recipe-cache-v2.1` 적용.
   - Navigation 및 HTML 문서는 **Network First**로 최신 배포본을 즉시 반영하며 오프라인 시 캐시 폴백.
   - 구버전 캐시 자동 정리 (`activate` 단계).
-- **사용자 격리 보안 규칙 (`firestore.rules`)**:
-  - `match /users/{userId}/{document=**} { allow read, write: if request.auth != null && request.auth.uid == userId; }`
-  - 각 사용자는 자신의 UID 서브컬렉션에만 안전하게 접근 가능.
-- **데이터 마이그레이션 및 병합 (`CloudMigrationModal.tsx`, `firestoreSync.ts`)**:
-  - 기존 로컬스토리지 데이터를 손실 없이 클라우드로 안전하게 업로드.
-  - 다기기 충돌 시 [양쪽 데이터 병합], [로컬 데이터 업로드], [클라우드 데이터 사용] 옵션 제공.
+- **보안 규칙 (`firestore.rules`)**:
+  - `/recipes/{recipeId}`: 읽기는 모든 사용자 허용, 쓰기는 관리자(`isAdmin()`)만 허용.
+  - `/users/{userId}/{document=**}`: `request.auth != null && request.auth.uid == userId`인 본인만 접근 허용.
+  - `/admins/{adminId}`: 관리자만 접근 허용.
 
-### 4.2 로컬스토리지 영속화 (Local Fallback)
+### 4.3 로컬스토리지 영속화 (Local Fallback)
 1. `my_recipes_data`: 레시피 목록 (초기 26개 시드 보존)
 2. `my_recipes_bookmarks`: 즐겨찾기 ID 목록
 3. `my_recipes_shopping_list`: 장보기 목록

@@ -1,22 +1,47 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // 1. Top-level public recipes collection:
-    // Anyone (guests and logged-in users) can read and search recipes.
-    // Writes (create, update, delete) are permitted only for authenticated admin.
-    match /recipes/{recipeId} {
-      allow read: if true;
-      allow write: if request.auth != null;
+    // 인증 여부 검사 헬퍼
+    function isSignedIn() {
+      return request.auth != null;
     }
 
-    // 2. Private user settings, bookmarks, notes, and shopping list under users/{userId}
-    // Each user can only read and write their own data.
+    // 관리자 권한 검사 헬퍼 (공식 관리자 계정 syndicat@eugenes.co.kr 또는 admins 컬렉션 등록 UID)
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'syndicat@eugenes.co.kr' ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    // 1. 최상위 공개 레시피 컬렉션 (/recipes/{recipeId}):
+    // 모든 방문자(비로그인 및 로그인 사용자)는 자유롭게 조회 가능
+    // 등록/수정/삭제는 오직 인증된 관리자(Admin)만 허용
+    match /recipes/{recipeId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // 2. 사용자 개인 데이터 (users/{userId}):
+    // 개인 레시피(users/{userId}/recipes/{recipeId}), 즐겨찾기/메모(users/{userId}/settings/data),
+    // 장보기 목록(users/{userId}/shoppingItems/{itemId})
+    // 오직 본인(request.auth.uid == userId)만 읽기 및 쓰기 가능
     match /users/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+      allow read, write: if isSignedIn() && request.auth.uid == userId;
       
-      match /{allSubcollections=**} {
-        allow read, write: if request.auth != null && request.auth.uid == userId;
+      match /recipes/{recipeId} {
+        allow read, write: if isSignedIn() && request.auth.uid == userId;
       }
+
+      match /{allSubcollections=**} {
+        allow read, write: if isSignedIn() && request.auth.uid == userId;
+      }
+    }
+
+    // 3. 관리자 권한 관리 컬렉션
+    match /admins/{adminId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
     }
   }
 }

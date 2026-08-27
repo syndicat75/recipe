@@ -29,7 +29,7 @@ export const Toast: React.FC<ToastProps> = ({ toasts, onDismiss }) => {
           key={toast.id}
           className="pointer-events-auto flex items-center justify-between gap-3 rounded-2xl border border-orange-200 bg-stone-900/95 px-4 py-3 text-xs font-bold text-white shadow-2xl backdrop-blur-md transition duration-300"
         >
-          <span>{toast.message}</span>
+          <span className="whitespace-pre-line leading-relaxed">{toast.message}</span>
           <button
             type="button"
             onClick={() => onDismiss(toast.id)}

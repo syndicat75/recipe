@@ -69,6 +69,7 @@ export function subscribeToPublicRecipes(
           sharedWithFamily: Boolean(data.sharedWithFamily),
           sourceImageUrl: data.sourceImageUrl || undefined,
           isCustom: Boolean(data.isCustom),
+          syncScope: 'public',
           isBookmarked: Boolean(data.isBookmarked),
           userNotes: data.userNotes || '',
           createdAt: data.createdAt || Date.now(),
@@ -115,6 +116,7 @@ export async function savePublicRecipe(recipe: Recipe): Promise<void> {
   const recipePayload = {
     ...recipe,
     id: recipe.id,
+    syncScope: 'public',
     updatedAt: Date.now(),
   };
 
@@ -162,6 +164,7 @@ export async function publishAllRecipesToPublic(recipes: Recipe[]): Promise<void
         {
           ...recipe,
           id: recipe.id,
+          syncScope: 'public',
           updatedAt: Date.now(),
         },
         { merge: true }
@@ -211,6 +214,7 @@ export function subscribeToUserRecipes(
           sharedWithFamily: Boolean(data.sharedWithFamily),
           sourceImageUrl: data.sourceImageUrl || undefined,
           isCustom: Boolean(data.isCustom),
+          syncScope: 'private',
           isBookmarked: Boolean(data.isBookmarked),
           userNotes: data.userNotes || '',
           createdAt: data.createdAt || Date.now(),
@@ -218,6 +222,7 @@ export function subscribeToUserRecipes(
         } as Recipe;
       });
 
+      logger.info('firestoreSync.subscribeToUserRecipes', `사용자 개인 레시피 수신 (${recipes.length}개)`);
       onUpdate(recipes);
     },
     (error) => {
@@ -328,54 +333,72 @@ export function subscribeToUserShopping(
 }
 
 /**
- * 단일 레시피 클라우드 저장/수정 (공개 /recipes 또는 개인 컬렉션)
+ * 로그인 일반 사용자용 Firestore 개인 레시피 저장/수정 (users/{uid}/recipes/{recipeId})
+ * 사용자의 개인 레시피는 절대 공개 컬렉션(/recipes)에 노출되지 않고 오직 본인의 모든 기기에서만 동기화됩니다.
+ *
+ * @param uid 사용자 Firebase UID
+ * @param recipe 저장할 레시피 객체
  */
-export async function saveRecipeToCloud(uid: string, recipe: Recipe): Promise<void> {
-  logger.info('firestoreSync.saveRecipeToCloud', `레시피 클라우드 저장 (UID: ${uid}, RecipeId: ${recipe.id})`);
+export async function savePrivateRecipe(uid: string, recipe: Recipe): Promise<void> {
+  logger.info('firestoreSync.savePrivateRecipe', `개인 레시피 클라우드 저장 (UID: ${uid}, ID: ${recipe.id}, Name: ${recipe.name})`);
 
   if (!db || !isFirebaseReady) {
     throw new Error('Firestore가 연결되지 않았습니다.');
   }
 
-  // 1. 공개 컬렉션 업데이트
-  const publicDocRef = doc(db, 'recipes', String(recipe.id));
-  const recipePayload = {
-    ...recipe,
-    id: recipe.id,
-    updatedAt: Date.now(),
-  };
+  const ref = doc(db, 'users', uid, 'recipes', String(recipe.id));
+  await setDoc(
+    ref,
+    {
+      ...recipe,
+      id: recipe.id,
+      syncScope: 'private',
+      updatedAt: Date.now(),
+    },
+    { merge: true }
+  );
+}
 
-  await setDoc(publicDocRef, recipePayload, { merge: true });
+/**
+ * 로그인 일반 사용자용 Firestore 개인 레시피 삭제 (users/{uid}/recipes/{recipeId})
+ *
+ * @param uid 사용자 Firebase UID
+ * @param recipeId 삭제할 레시피 ID
+ */
+export async function deletePrivateRecipe(uid: string, recipeId: number): Promise<void> {
+  logger.info('firestoreSync.deletePrivateRecipe', `개인 레시피 클라우드 삭제 (UID: ${uid}, ID: ${recipeId})`);
 
-  // 2. 사용자 개인 컬렉션 백업 보존
-  try {
-    const userDocRef = doc(db, 'users', uid, 'recipes', String(recipe.id));
-    await setDoc(userDocRef, recipePayload, { merge: true });
-  } catch (err) {
-    logger.warn('firestoreSync.saveRecipeToCloud', `개인 컬렉션 동기화 건너뜀: ${(err as Error).message}`);
+  if (!db || !isFirebaseReady) {
+    throw new Error('Firestore가 연결되지 않았습니다.');
+  }
+
+  const ref = doc(db, 'users', uid, 'recipes', String(recipeId));
+  await deleteDoc(ref);
+}
+
+/**
+ * 레거시 호환용: 단일 레시피 클라우드 저장 (권한에 따라 안전하게 분기)
+ * @deprecated savePrivateRecipe 또는 savePublicRecipe를 직접 사용하세요.
+ */
+export async function saveRecipeToCloud(uid: string, recipe: Recipe, isAdmin: boolean = false): Promise<void> {
+  logger.info('firestoreSync.saveRecipeToCloud', `레시피 클라우드 저장 분기 (UID: ${uid}, RecipeId: ${recipe.id}, isAdmin: ${isAdmin})`);
+  if (isAdmin) {
+    await savePublicRecipe(recipe);
+  } else {
+    await savePrivateRecipe(uid, recipe);
   }
 }
 
 /**
- * 단일 레시피 클라우드 삭제
+ * 레거시 호환용: 단일 레시피 클라우드 삭제 (권한에 따라 안전하게 분기)
+ * @deprecated deletePrivateRecipe 또는 deletePublicRecipe를 직접 사용하세요.
  */
-export async function deleteRecipeFromCloud(uid: string, recipeId: number): Promise<void> {
-  logger.info('firestoreSync.deleteRecipeFromCloud', `레시피 클라우드 삭제 (UID: ${uid}, RecipeId: ${recipeId})`);
-
-  if (!db || !isFirebaseReady) {
-    throw new Error('Firestore가 연결되지 않았습니다.');
-  }
-
-  // 1. 공개 컬렉션 삭제
-  const publicDocRef = doc(db, 'recipes', String(recipeId));
-  await deleteDoc(publicDocRef);
-
-  // 2. 개인 컬렉션 삭제
-  try {
-    const userDocRef = doc(db, 'users', uid, 'recipes', String(recipeId));
-    await deleteDoc(userDocRef);
-  } catch (err) {
-    logger.warn('firestoreSync.deleteRecipeFromCloud', `개인 컬렉션 삭제 건너뜀: ${(err as Error).message}`);
+export async function deleteRecipeFromCloud(uid: string, recipeId: number, isAdmin: boolean = false): Promise<void> {
+  logger.info('firestoreSync.deleteRecipeFromCloud', `레시피 클라우드 삭제 분기 (UID: ${uid}, RecipeId: ${recipeId}, isAdmin: ${isAdmin})`);
+  if (isAdmin) {
+    await deletePublicRecipe(recipeId);
+  } else {
+    await deletePrivateRecipe(uid, recipeId);
   }
 }
 
@@ -550,7 +573,9 @@ export async function fetchCloudSummary(uid?: string): Promise<CloudDataSummary>
 }
 
 /**
- * 로컬 데이터를 클라우드 공개 및 개인 컬렉션으로 마이그레이션 업로드
+ * 로컬 데이터를 클라우드 개인 컬렉션(users/{uid}/recipes)으로 안전하게 마이그레이션 업로드
+ * 일반 사용자의 로컬 레시피는 절대로 공개 컬렉션(/recipes)으로 유출되지 않으며,
+ * 본인 계정의 개인 레시피 컬렉션에 syncScope: 'private'로 보관됩니다.
  */
 export async function migrateLocalDataToCloud(
   uid: string,
@@ -561,15 +586,33 @@ export async function migrateLocalDataToCloud(
 ): Promise<void> {
   logger.info(
     'firestoreSync.migrateLocalDataToCloud',
-    `로컬 데이터 클라우드 마이그레이션 시작 (레시피 ${localRecipes.length}개, 장보기 ${localShopping.length}개)`
+    `로컬 데이터 클라우드 개인 컬렉션 마이그레이션 시작 (레시피 ${localRecipes.length}개, 장보기 ${localShopping.length}개)`
   );
 
   if (!db || !isFirebaseReady) {
     throw new Error('Firestore에 연결할 수 없습니다.');
   }
 
-  // 1. 공개 레시피 일괄 등록
-  await publishAllRecipesToPublic(localRecipes);
+  // 1. 사용자 개인 레시피 컬렉션 (users/{uid}/recipes)에 private 스코프로 청크 분할 업로드
+  const chunkSize = 400;
+  for (let i = 0; i < localRecipes.length; i += chunkSize) {
+    const chunk = localRecipes.slice(i, i + chunkSize);
+    const recipeBatch = writeBatch(db);
+    chunk.forEach((recipe) => {
+      const docRef = doc(db, 'users', uid, 'recipes', String(recipe.id));
+      recipeBatch.set(
+        docRef,
+        {
+          ...recipe,
+          id: recipe.id,
+          syncScope: 'private',
+          updatedAt: Date.now(),
+        },
+        { merge: true }
+      );
+    });
+    await recipeBatch.commit();
+  }
 
   // 2. 장보기 목록 일괄 등록
   const batch = writeBatch(db);
@@ -598,7 +641,7 @@ export async function migrateLocalDataToCloud(
   );
 
   await batch.commit();
-  logger.info('firestoreSync.migrateLocalDataToCloud', '로컬 데이터 마이그레이션 완료');
+  logger.info('firestoreSync.migrateLocalDataToCloud', '로컬 데이터 개인 클라우드 마이그레이션 완료');
 }
 
 /**

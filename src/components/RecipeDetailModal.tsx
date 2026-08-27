@@ -268,11 +268,26 @@ ${userNote ? `\n[📝 나의 메모]\n${userNote}` : ''}`;
           <div className="flex items-center gap-3">
             <span className="text-3xl sm:text-4xl">{recipe.icon || '🍲'}</span>
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <span className={`inline-flex items-center rounded-lg px-2 py-0.5 text-xs font-black ${categoryMeta.badgeClass}`}>
                   {recipe.category}
                 </span>
-                {recipe.isCustom && (
+                {recipe.syncScope === 'public' && (
+                  <span className="inline-flex items-center gap-1 rounded-lg bg-sky-100 px-2 py-0.5 text-xs font-bold text-sky-800" title="모든 사용자에게 공개된 레시피">
+                    ☁️ 공개
+                  </span>
+                )}
+                {recipe.syncScope === 'private' && (
+                  <span className="inline-flex items-center gap-1 rounded-lg bg-violet-100 px-2 py-0.5 text-xs font-bold text-violet-800" title="내 계정에 저장되어 모든 기기에서 동기화되는 개인 레시피">
+                    ☁️ 개인 클라우드
+                  </span>
+                )}
+                {recipe.syncScope === 'local' && (
+                  <span className="inline-flex items-center gap-1 rounded-lg bg-stone-100 px-2 py-0.5 text-xs font-bold text-stone-700" title="현재 기기에만 저장된 로컬 레시피">
+                    📱 이 기기
+                  </span>
+                )}
+                {recipe.isCustom && recipe.syncScope !== 'local' && (
                   <span className="inline-flex items-center rounded-lg bg-orange-100 px-2 py-0.5 text-xs font-black text-orange-800">
                     직접 등록
                   </span>
@@ -654,7 +669,7 @@ ${userNote ? `\n[📝 나의 메모]\n${userNote}` : ''}`;
             </div>
 
             <div className="flex items-center gap-2">
-              {(isAdmin || recipe.syncScope === 'local' || recipe.isCustom) && (
+              {(isAdmin || recipe.syncScope === 'local' || recipe.syncScope === 'private' || recipe.isCustom) && (
                 <>
                   <button
                     type="button"
