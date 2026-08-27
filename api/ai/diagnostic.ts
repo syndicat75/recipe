@@ -24,6 +24,10 @@ export default async function handler(
 
   let sdkLoaded = false;
   let clientCreated = false;
+  let apiCallSuccess = false;
+  let apiResponse: string | null = null;
+  let apiErrorName: string | null = null;
+  let apiErrorMessage: string | null = null;
   let details = '';
 
   try {
@@ -35,6 +39,27 @@ export default async function handler(
         apiKey: process.env.GEMINI_API_KEY!.trim(),
       });
       clientCreated = Boolean(client);
+
+      if (client) {
+        try {
+          const result = await client.models.generateContent({
+            model: 'gemini-3.7-flash',
+            contents: '1+1은? 숫자만 답해.',
+          });
+          apiCallSuccess = true;
+          apiResponse = result.text ?? '';
+        } catch (callError) {
+          apiCallSuccess = false;
+          apiErrorName =
+            callError instanceof Error
+              ? callError.name
+              : 'UnknownError';
+          apiErrorMessage =
+            callError instanceof Error
+              ? callError.message
+              : String(callError);
+        }
+      }
     }
   } catch (error) {
     details =
@@ -50,6 +75,10 @@ export default async function handler(
     geminiApiKeyConfigured: hasKey,
     sdkLoaded,
     clientCreated,
+    apiCallSuccess,
+    apiResponse: apiResponse ?? undefined,
+    apiErrorName: apiErrorName ?? undefined,
+    apiErrorMessage: apiErrorMessage ?? undefined,
     details: details || undefined,
   });
 }
