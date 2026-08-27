@@ -14,9 +14,10 @@ import {
   Bookmark,
   Upload,
   Link2,
+  Loader2,
 } from 'lucide-react';
 import { APP_CONFIG, CATEGORY_LIST } from '../config/appConfig';
-import { Recipe, RecipeCategory } from '../types/recipe';
+import { Recipe, RecipeCategory, SaveRecipeResult } from '../types/recipe';
 import { logger } from '../utils/logger';
 
 interface RecipeFormModalProps {
@@ -30,12 +31,18 @@ interface RecipeFormModalProps {
   initialUserNote?: string;
   /** 닫기 핸들러 */
   onClose: () => void;
-  /** 저장 핸들러 */
-  onSaveRecipe: (recipe: Recipe, isBookmarked: boolean, userNote: string) => void;
+  /** 저장 핸들러 (SaveRecipeResult 반환) */
+  onSaveRecipe: (
+    recipe: Recipe,
+    isBookmarked: boolean,
+    userNote: string
+  ) => Promise<SaveRecipeResult> | SaveRecipeResult | void;
   /** 삭제 핸들러 (수정 모드일 때 사용) */
   onDeleteRecipe?: (recipeId: number) => void;
   /** 토스트 메시지 표시 함수 */
-  showToast: (msg: string) => void;
+  showToast: (msg: string, type?: 'success' | 'info' | 'warning' | 'error') => void;
+  /** 관리자 여부 */
+  isAdmin?: boolean;
 }
 
 /**
@@ -50,6 +57,7 @@ export const RecipeFormModal: React.FC<RecipeFormModalProps> = ({
   onSaveRecipe,
   onDeleteRecipe,
   showToast,
+  isAdmin = false,
 }) => {
   const isEditMode = !!recipeToEdit;
 
@@ -64,6 +72,7 @@ export const RecipeFormModal: React.FC<RecipeFormModalProps> = ({
   const [isBookmarked, setIsBookmarked] = useState<boolean>(false);
   const [userNote, setUserNote] = useState<string>('');
   const [imageTab, setImageTab] = useState<'emoji' | 'url' | 'upload'>('emoji');
+  const [isSaving, setIsSaving] = useState<boolean>(false);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -100,6 +109,7 @@ export const RecipeFormModal: React.FC<RecipeFormModalProps> = ({
         setUserNote('');
         setImageTab('emoji');
       }
+      setIsSaving(false);
 
       return () => {
         document.body.style.overflow = originalOverflow;
@@ -120,7 +130,7 @@ export const RecipeFormModal: React.FC<RecipeFormModalProps> = ({
     logger.info('RecipeFormModal.handleFileUpload', `이미지 파일 선택: ${file.name} (${file.size} bytes)`);
 
     if (file.size > 2 * 1024 * 1024) {
-      showToast('⚠️ 이미지 파일 크기는 2MB 이하로 올려주세요.');
+      showToast('⚠️ 이미지 파일 크기는 2MB 이하로 올려주세요.', 'warning');
       return;
     }
 
@@ -128,12 +138,12 @@ export const RecipeFormModal: React.FC<RecipeFormModalProps> = ({
     reader.onload = () => {
       if (typeof reader.result === 'string') {
         setImageUrl(reader.result);
-        showToast('📷 사진이 첨부되었습니다.');
+        showToast('📷 사진이 첨부되었습니다.', 'info');
       }
     };
     reader.onerror = () => {
       logger.error('RecipeFormModal.handleFileUpload', '파일 읽기 실패');
-      showToast('⚠️ 이미지 파일을 읽는 데 실패했습니다.');
+      showToast('⚠️ 이미지 파일을 읽는 데 실패했습니다.', 'error');
     };
     reader.readAsDataURL(file);
   };
@@ -142,16 +152,18 @@ export const RecipeFormModal: React.FC<RecipeFormModalProps> = ({
    * 폼 제출 및 레시피 저장 핸들러
    * @param e 폼 이벤트
    */
-  const handleSubmit = (e: React.FormEvent): void => {
+  const handleSubmit = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault();
+    if (isSaving) return;
+
     logger.info('RecipeFormModal.handleSubmit', `레시피 저장 시도: "${name}" (수정여부: ${isEditMode})`);
 
     if (!name.trim()) {
-      showToast('⚠️ 음식명을 입력해주세요.');
+      showToast('⚠️ 음식명을 입력해주세요.', 'warning');
       return;
     }
     if (!ingredients.trim()) {
-      showToast('⚠️ 재료를 최소 1개 이상 입력해주세요.');
+      showToast('⚠️ 재료를 최소 1개 이상 입력해주세요.', 'warning');
       return;
     }
 
@@ -166,6 +178,11 @@ export const RecipeFormModal: React.FC<RecipeFormModalProps> = ({
 
     const targetId = isEditMode && recipeToEdit ? recipeToEdit.id : Date.now();
     const createdAt = isEditMode && recipeToEdit ? recipeToEdit.createdAt || Date.now() : Date.now();
+    const targetScope = isEditMode && recipeToEdit?.syncScope
+      ? recipeToEdit.syncScope
+      : isAdmin
+      ? 'public'
+      : 'local';
 
     const recipeData: Recipe = {
       id: targetId,
@@ -182,17 +199,53 @@ export const RecipeFormModal: React.FC<RecipeFormModalProps> = ({
       isCustom: isEditMode ? recipeToEdit?.isCustom ?? true : true,
       isBookmarked,
       userNotes: userNote.trim() || undefined,
+      syncScope: targetScope,
       createdAt,
       updatedAt: Date.now(),
     };
 
-    onSaveRecipe(recipeData, isBookmarked, userNote.trim());
-    showToast(
-      isEditMode
-        ? `✨ '${recipeData.name}' 레시피가 수정되었습니다.`
-        : `🎉 '${recipeData.name}' 레시피가 등록되었습니다!`
-    );
-    onClose();
+    setIsSaving(true);
+    try {
+      const result = await onSaveRecipe(recipeData, isBookmarked, userNote.trim());
+
+      if (result && typeof result === 'object' && 'success' in result) {
+        if (!result.success) {
+          showToast(result.error || '레시피 저장에 실패했습니다.', 'error');
+          setIsSaving(false);
+          return;
+        }
+
+        if (result.scope === 'public') {
+          showToast(
+            isEditMode
+              ? `✨ '${recipeData.name}' 레시피가 수정되어 공개 레시피 북에 반영되었습니다.`
+              : `🎉 '${recipeData.name}' 레시피가 공개 레시피 북에 등록되었습니다!`,
+            'success'
+          );
+        } else {
+          showToast(
+            isEditMode
+              ? `✨ '${recipeData.name}' 레시피가 내 기기에 수정되었습니다.`
+              : `🎉 '${recipeData.name}' 레시피가 내 기기에 저장되었습니다!`,
+            'success'
+          );
+        }
+      } else {
+        showToast(
+          isEditMode
+            ? `✨ '${recipeData.name}' 레시피가 수정되었습니다.`
+            : `🎉 '${recipeData.name}' 레시피가 등록되었습니다!`,
+          'success'
+        );
+      }
+
+      onClose();
+    } catch (err) {
+      logger.error('RecipeFormModal.handleSubmit', '레시피 저장 오류', err);
+      showToast('레시피 저장 중 오류가 발생했습니다.', 'error');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   /**
@@ -517,16 +570,27 @@ export const RecipeFormModal: React.FC<RecipeFormModalProps> = ({
               <button
                 type="button"
                 onClick={onClose}
-                className="rounded-xl px-4 py-2.5 text-xs font-bold text-stone-600 hover:bg-stone-100"
+                disabled={isSaving}
+                className="rounded-xl px-4 py-2.5 text-xs font-bold text-stone-600 hover:bg-stone-100 disabled:opacity-50"
               >
                 취소
               </button>
               <button
                 type="submit"
-                className="flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 px-5 py-2.5 text-xs font-black text-white shadow-md transition hover:from-orange-600 hover:to-amber-600"
+                disabled={isSaving}
+                className="flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 px-5 py-2.5 text-xs font-black text-white shadow-md transition hover:from-orange-600 hover:to-amber-600 disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                {isEditMode ? <Save className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-                <span>{isEditMode ? '수정 내용 저장' : '레시피 등록'}</span>
+                {isSaving ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span>저장 중...</span>
+                  </>
+                ) : (
+                  <>
+                    {isEditMode ? <Save className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+                    <span>{isEditMode ? '수정 내용 저장' : '레시피 등록'}</span>
+                  </>
+                )}
               </button>
             </div>
           </div>

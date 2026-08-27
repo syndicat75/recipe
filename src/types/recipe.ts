@@ -53,10 +53,24 @@ export interface Recipe {
   userNotes?: string;
   /** 요리 꿀팁/팁 (선택) */
   tip?: string;
+  /** 동기화 스코프 ('public': Firestore 공개 레시피, 'local': 사용자 로컬 전용 레시피) */
+  syncScope?: 'public' | 'local';
   /** 생성 일시 타임스탬프 */
   createdAt?: number;
   /** 등록/수정 일시 타임스탬프 또는 ISO 문자열 */
   updatedAt?: number | string;
+}
+
+/**
+ * 레시피 저장 작업 결과 인터페이스
+ */
+export interface SaveRecipeResult {
+  /** 저장 성공 여부 */
+  success: boolean;
+  /** 저장된 스코프 ('local' 또는 'public') */
+  scope: 'local' | 'public';
+  /** 실패 또는 경고 메시지 */
+  error?: string;
 }
 
 /**

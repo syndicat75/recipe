@@ -41,9 +41,10 @@ export function loadAllRecipes(): Recipe[] {
 
     // 초기 시드 생성
     const initialSeed: Recipe[] = [
-      ...legacyCustom,
+      ...legacyCustom.map((r) => ({ ...r, syncScope: r.syncScope || ('local' as const) })),
       ...INITIAL_RECIPES.map((r, idx) => ({
         ...r,
+        syncScope: 'public' as const,
         createdAt: Date.now() - (INITIAL_RECIPES.length - idx) * 1000,
         updatedAt: Date.now() - (INITIAL_RECIPES.length - idx) * 1000,
       })),

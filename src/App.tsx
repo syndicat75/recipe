@@ -17,6 +17,7 @@ import {
   FamilyUserProfile,
   WeeklyMealPlan,
   MealPlanEntry,
+  SaveRecipeResult,
 } from './types/recipe';
 import { CATEGORY_LIST } from './config/appConfig';
 import {
@@ -490,75 +491,93 @@ export default function App(): React.JSX.Element {
   }, []);
 
   /**
-   * 레시피 등록 또는 수정 저장 핸들러 (관리자 전용)
+   * 레시피 등록 또는 수정 저장 핸들러 (관리자: 공개 레시피 북, 일반 사용자: 로컬 저장소 영속화)
    */
   const handleSaveRecipe = useCallback(
-    (recipeData: Recipe, isBookmarked: boolean, userNote: string): void => {
-      logger.info('App.handleSaveRecipe', `레시피 저장: ${recipeData.name} (ID: ${recipeData.id}, 관리자: ${isAdmin})`);
+    async (
+      recipeData: Recipe,
+      isBookmarked: boolean,
+      userNote: string
+    ): Promise<SaveRecipeResult> => {
+      logger.info(
+        'App.handleSaveRecipe',
+        `레시피 저장 시도: ${recipeData.name} (ID: ${recipeData.id}, 관리자: ${isAdmin})`
+      );
 
-      if (!isAdmin) {
-        showToast('🔒 레시피 추가 및 수정은 관리자만 가능합니다.', 'warning');
-        return;
-      }
+      const isPublicTarget = isAdmin && (recipeData.syncScope === 'public' || !recipeData.syncScope);
+      const effectiveScope: 'public' | 'local' = isPublicTarget ? 'public' : 'local';
 
+      const normalizedRecipe: Recipe = {
+        ...recipeData,
+        syncScope: effectiveScope,
+        updatedAt: Date.now(),
+      };
+
+      // 1. 로컬 상태 업데이트 및 localStorage 영속화
       setRecipes((prev) => {
-        const existingIdx = prev.findIndex((r) => r.id === recipeData.id);
+        const existingIdx = prev.findIndex((r) => r.id === normalizedRecipe.id);
         let next: Recipe[];
         if (existingIdx >= 0) {
           next = [...prev];
-          next[existingIdx] = recipeData;
+          next[existingIdx] = normalizedRecipe;
         } else {
-          next = [recipeData, ...prev];
+          next = [normalizedRecipe, ...prev];
         }
         saveAllRecipes(next);
         return next;
       });
 
-      // 북마크 상태 반영
+      // 2. 북마크 상태 반영
       let nextBookmarks: number[] = bookmarkedIds;
       setBookmarkedIds((prev) => {
-        const has = prev.includes(recipeData.id);
+        const has = prev.includes(normalizedRecipe.id);
         let next = prev;
         if (isBookmarked && !has) {
-          next = [...prev, recipeData.id];
+          next = [...prev, normalizedRecipe.id];
         } else if (!isBookmarked && has) {
-          next = prev.filter((id) => id !== recipeData.id);
+          next = prev.filter((id) => id !== normalizedRecipe.id);
         }
         saveBookmarks(next);
         nextBookmarks = next;
         return next;
       });
 
-      // 사용자 메모 저장
+      // 3. 사용자 메모 저장
       let nextNotes: Record<number, string> = userNotes;
       if (userNote !== undefined) {
         setUserNotes((prev) => {
-          const next = { ...prev, [recipeData.id]: userNote };
-          saveRecipeNote(recipeData.id, userNote);
+          const next = { ...prev, [normalizedRecipe.id]: userNote };
+          saveRecipeNote(normalizedRecipe.id, userNote);
           nextNotes = next;
           return next;
         });
       }
 
-      // 관리자: 공개 컬렉션 (/recipes) 실시간 동기화
-      savePublicRecipe(recipeData).catch((err) => {
-        logger.error('App.handleSaveRecipe', '공개 레시피 클라우드 저장 실패', err);
-        showToast('클라우드 동기화 중 일시적 오류가 발생했습니다. 로컬 저장은 완료되었습니다.', 'warning');
-      });
+      // 4. 관리자: 공개 컬렉션 (/recipes) 실시간 동기화
+      if (isPublicTarget) {
+        try {
+          await savePublicRecipe(normalizedRecipe);
+        } catch (err) {
+          logger.error('App.handleSaveRecipe', '공개 레시피 클라우드 저장 실패', err);
+          showToast('클라우드 동기화 중 일시적 오류가 발생하여 내 기기에 임시 보관되었습니다.', 'warning');
+          return { success: true, scope: 'local' };
+        }
+      }
 
+      // 5. 로그인 사용자: 개인 북마크 & 메모 동기화
       if (user) {
         saveBookmarksToCloud(user.uid, nextBookmarks).catch((err) => {
           logger.error('App.handleSaveRecipe', '클라우드 북마크 동기화 실패', err);
         });
 
         if (userNote !== undefined) {
-          saveRecipeNoteToCloud(user.uid, recipeData.id, userNote, nextNotes).catch((err) => {
+          saveRecipeNoteToCloud(user.uid, normalizedRecipe.id, userNote, nextNotes).catch((err) => {
             logger.error('App.handleSaveRecipe', '클라우드 메모 동기화 실패', err);
           });
         }
       }
 
-      showToast(`'${recipeData.name}' 레시피가 성공적으로 저장되었습니다!`, 'success');
+      return { success: true, scope: effectiveScope };
     },
     [isAdmin, user, bookmarkedIds, userNotes, showToast]
   );
@@ -653,26 +672,31 @@ export default function App(): React.JSX.Element {
   );
 
   /**
-   * 레시피 삭제 요청 (관리자 전용)
+   * 레시피 삭제 요청 (관리자: 공개 레시피 삭제, 일반 사용자: 로컬 레시피 삭제)
    */
   const handleDeleteRecipeRequest = useCallback(
     (recipeId: number): void => {
       const target = recipes.find((r) => r.id === recipeId);
       if (!target) return;
 
-      if (!isAdmin) {
-        showToast('🔒 레시피 삭제는 관리자만 가능합니다.', 'warning');
+      const isPublicTarget = target.syncScope === 'public';
+      if (!isAdmin && isPublicTarget) {
+        showToast('🔒 공개 공식 레시피 삭제는 관리자만 가능합니다.', 'warning');
         return;
       }
+
+      const isPublicDelete = isAdmin && isPublicTarget;
 
       setConfirmDialog({
         isOpen: true,
         title: '레시피 삭제',
-        message: `'${target.name}' 레시피를 정말 삭제하시겠습니까? 삭제된 레시피는 공개 목록에서 영구히 제거됩니다.`,
+        message: isPublicDelete
+          ? `'${target.name}' 레시피를 정말 삭제하시겠습니까? 삭제된 레시피는 공개 목록에서 영구히 제거됩니다.`
+          : `'${target.name}' 레시피를 내 기기에서 삭제하시겠습니까?`,
         confirmText: '삭제',
         isDestructive: true,
         onConfirm: () => {
-          logger.info('App.handleDeleteRecipe', `관리자 레시피 삭제 확정: ID ${recipeId}`);
+          logger.info('App.handleDeleteRecipe', `레시피 삭제 확정: ID ${recipeId}`);
           setRecipes((prev) => {
             const next = prev.filter((r) => r.id !== recipeId);
             saveAllRecipes(next);
@@ -687,9 +711,11 @@ export default function App(): React.JSX.Element {
             return next;
           });
 
-          deletePublicRecipe(recipeId).catch((err) => {
-            logger.error('App.handleDeleteRecipe', '공개 레시피 삭제 실패', err);
-          });
+          if (isPublicDelete) {
+            deletePublicRecipe(recipeId).catch((err) => {
+              logger.error('App.handleDeleteRecipe', '공개 레시피 삭제 실패', err);
+            });
+          }
 
           setSelectedRecipe(null);
           setRecipeToEdit(null);
@@ -1484,6 +1510,7 @@ export default function App(): React.JSX.Element {
         onSaveRecipe={handleSaveRecipe}
         onDeleteRecipe={handleDeleteRecipeRequest}
         showToast={showToast}
+        isAdmin={isAdmin}
       />
 
       {/* 4. External AI Recipe Import Modal (URL/Text/Image OCR) */}
@@ -1492,7 +1519,33 @@ export default function App(): React.JSX.Element {
         existingRecipes={recipes}
         onClose={() => setIsImportModalOpen(false)}
         onSaveRecipe={handleSaveRecipe}
+        onOpenDirectRegister={(prefill) => {
+          setIsImportModalOpen(false);
+          const ing = prefill?.ingredients || '';
+          const mth = prefill?.method || '';
+          const ingCount = ing.split(/\n+/).map((s) => s.trim()).filter(Boolean).length;
+          const stCount = mth.split(/\n+/).map((s) => s.trim()).filter(Boolean).length;
+          setRecipeToEdit({
+            id: Date.now(),
+            name: prefill?.name || '',
+            category: '반찬',
+            icon: '🍳',
+            ingredients: ing,
+            method: mth,
+            ingredientCount: ingCount,
+            stepCount: stCount,
+            cookingTimeMinutes: 15,
+            difficulty: '쉬움',
+            imageUrl: prefill?.imageUrl || undefined,
+            isCustom: true,
+            syncScope: isAdmin ? 'public' : 'local',
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          });
+          setIsFormModalOpen(true);
+        }}
         showToast={showToast}
+        isAdmin={isAdmin}
       />
 
       {/* 5. 🎲 Today Menu Modal (Random Roulette & AI Recommender) */}

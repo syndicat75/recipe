@@ -654,7 +654,7 @@ ${userNote ? `\n[📝 나의 메모]\n${userNote}` : ''}`;
             </div>
 
             <div className="flex items-center gap-2">
-              {isAdmin && (
+              {(isAdmin || recipe.syncScope === 'local' || recipe.isCustom) && (
                 <>
                   <button
                     type="button"
@@ -663,7 +663,7 @@ ${userNote ? `\n[📝 나의 메모]\n${userNote}` : ''}`;
                       onOpenEditRecipe(recipe);
                     }}
                     className="flex items-center gap-1 rounded-xl bg-stone-100 px-3 py-2 text-xs font-bold text-stone-700 hover:bg-stone-200"
-                    title="레시피 수정 (관리자)"
+                    title="레시피 수정"
                   >
                     <Edit3 className="h-3.5 w-3.5 text-stone-600" />
                     <span>레시피 수정</span>
@@ -676,7 +676,7 @@ ${userNote ? `\n[📝 나의 메모]\n${userNote}` : ''}`;
                       onDeleteRecipe(recipe.id);
                     }}
                     className="flex items-center gap-1 rounded-xl bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700 hover:bg-rose-100"
-                    title="레시피 삭제 (관리자)"
+                    title="레시피 삭제"
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                     <span>삭제</span>

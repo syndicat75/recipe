@@ -26,7 +26,7 @@ import {
   RotateCcw,
 } from 'lucide-react';
 import { APP_CONFIG, CATEGORY_CONFIG, CATEGORY_LIST } from '../config/appConfig';
-import { Recipe, RecipeCategory } from '../types/recipe';
+import { Recipe, RecipeCategory, SaveRecipeResult } from '../types/recipe';
 import { logger } from '../utils/logger';
 import { callAiApi } from '../utils/aiApiHelper';
 
@@ -38,9 +38,22 @@ interface ImportRecipeModalProps {
   /** 모달 닫기 핸들러 */
   onClose: () => void;
   /** 레시피 저장 핸들러 */
-  onSaveRecipe: (recipe: Recipe, isBookmarked: boolean, userNote: string) => void;
+  onSaveRecipe: (
+    recipe: Recipe,
+    isBookmarked: boolean,
+    userNote: string
+  ) => Promise<SaveRecipeResult> | SaveRecipeResult | void;
+  /** 직접 레시피 등록 모달 열기 핸들러 (AI 분석 실패 또는 직접 입력 전환 시) */
+  onOpenDirectRegister?: (prefill?: {
+    name?: string;
+    ingredients?: string;
+    method?: string;
+    imageUrl?: string;
+  }) => void;
   /** 토스트 메시지 표시 함수 */
-  showToast: (msg: string, type?: 'success' | 'info' | 'error') => void;
+  showToast: (msg: string, type?: 'success' | 'info' | 'warning' | 'error') => void;
+  /** 관리자 여부 */
+  isAdmin?: boolean;
 }
 
 type ImportTab = 'url' | 'text' | 'image';
@@ -103,7 +116,9 @@ export const ImportRecipeModal: React.FC<ImportRecipeModalProps> = ({
   existingRecipes,
   onClose,
   onSaveRecipe,
+  onOpenDirectRegister,
   showToast,
+  isAdmin = false,
 }) => {
   const [activeTab, setActiveTab] = useState<ImportTab>('url');
   const [urlInput, setUrlInput] = useState('');
@@ -116,6 +131,7 @@ export const ImportRecipeModal: React.FC<ImportRecipeModalProps> = ({
   const cameraInputRef = useRef<HTMLInputElement>(null);
 
   const [isLoading, setIsLoading] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   // AI 분석 결과 검토 상태 (Step 2)
@@ -255,8 +271,8 @@ export const ImportRecipeModal: React.FC<ImportRecipeModalProps> = ({
   /**
    * 최종 검토 후 레시피 저장 핸들러
    */
-  const handleFinalSave = (): void => {
-    if (!parsedRecipe) return;
+  const handleFinalSave = async (): Promise<void> => {
+    if (!parsedRecipe || isSaving) return;
 
     logger.info('ImportRecipeModal.handleFinalSave', `가져온 레시피 저장: ${parsedRecipe.name}`);
 
@@ -280,6 +296,8 @@ export const ImportRecipeModal: React.FC<ImportRecipeModalProps> = ({
       .map((s) => s.trim())
       .filter(Boolean);
 
+    const targetScope = isAdmin ? 'public' : 'local';
+
     const newRecipe: Recipe = {
       id: Date.now(),
       name: finalName,
@@ -294,14 +312,39 @@ export const ImportRecipeModal: React.FC<ImportRecipeModalProps> = ({
       difficulty: parsedRecipe.difficulty,
       sourceImageUrl: saveSourceImageOption ? parsedRecipe.sourceImageUrl : undefined,
       isCustom: true,
+      syncScope: targetScope,
       userNotes: parsedRecipe.tips || '',
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
 
-    onSaveRecipe(newRecipe, false, parsedRecipe.tips || '');
-    showToast(`'${finalName}' 레시피가 내 레시피 북에 추가되었습니다!`, 'success');
-    onClose();
+    setIsSaving(true);
+    try {
+      const result = await onSaveRecipe(newRecipe, false, parsedRecipe.tips || '');
+
+      if (result && typeof result === 'object' && 'success' in result) {
+        if (!result.success) {
+          showToast(result.error || '레시피 저장에 실패했습니다.', 'error');
+          setIsSaving(false);
+          return;
+        }
+
+        if (result.scope === 'public') {
+          showToast(`'${finalName}' 레시피가 공개 레시피 북에 추가되었습니다!`, 'success');
+        } else {
+          showToast(`'${finalName}' 레시피가 내 기기에 저장되었습니다!`, 'success');
+        }
+      } else {
+        showToast(`'${finalName}' 레시피가 추가되었습니다!`, 'success');
+      }
+
+      onClose();
+    } catch (err) {
+      logger.error('ImportRecipeModal.handleFinalSave', '저장 중 예외 발생', err);
+      showToast('레시피 저장 중 오류가 발생했습니다.', 'error');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -497,9 +540,28 @@ export const ImportRecipeModal: React.FC<ImportRecipeModalProps> = ({
                 )}
 
                 {errorMsg && (
-                  <div className="flex items-center gap-2 rounded-2xl bg-rose-50 p-3 text-xs text-rose-700">
-                    <AlertCircle className="h-4 w-4 shrink-0" />
-                    <span>{errorMsg}</span>
+                  <div className="flex flex-col gap-2 rounded-2xl bg-rose-50 border border-rose-200/80 p-3.5 text-xs text-rose-800">
+                    <div className="flex items-center gap-2">
+                      <AlertCircle className="h-4 w-4 shrink-0 text-rose-600" />
+                      <span className="font-semibold">{errorMsg}</span>
+                    </div>
+                    {onOpenDirectRegister && (
+                      <div className="mt-1 flex items-center justify-end">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onClose();
+                            onOpenDirectRegister({
+                              ingredients: activeTab === 'text' ? textInput : undefined,
+                              imageUrl: activeTab === 'image' && imagePreview ? imagePreview : undefined,
+                            });
+                          }}
+                          className="inline-flex items-center gap-1.5 rounded-xl bg-white px-3.5 py-1.5 font-bold text-orange-700 shadow-xs border border-orange-200 hover:bg-orange-50 active:scale-95 transition"
+                        >
+                          <span>✍️ 직접 레시피 등록으로 이동</span>
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -664,17 +726,28 @@ export const ImportRecipeModal: React.FC<ImportRecipeModalProps> = ({
                 <button
                   type="button"
                   onClick={() => setParsedRecipe(null)}
-                  className="rounded-2xl px-4 py-2.5 font-soft text-xs font-bold text-stone-600 hover:bg-stone-100"
+                  disabled={isSaving}
+                  className="rounded-2xl px-4 py-2.5 font-soft text-xs font-bold text-stone-600 hover:bg-stone-100 disabled:opacity-50"
                 >
                   이전으로
                 </button>
                 <button
                   type="button"
                   onClick={handleFinalSave}
-                  className="flex items-center gap-1.5 rounded-2xl bg-orange-500 px-6 py-2.5 font-soft text-xs font-bold text-white shadow-md hover:bg-orange-600 active:scale-95 transition-all"
+                  disabled={isSaving}
+                  className="flex items-center gap-1.5 rounded-2xl bg-orange-500 px-6 py-2.5 font-soft text-xs font-bold text-white shadow-md hover:bg-orange-600 active:scale-95 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
                 >
-                  <Save className="h-4 w-4" />
-                  <span>내 레시피로 저장</span>
+                  {isSaving ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span>저장 중...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Save className="h-4 w-4" />
+                      <span>{isAdmin ? '공개 레시피 북에 저장' : '내 레시피로 저장'}</span>
+                    </>
+                  )}
                 </button>
               </div>
             </div>
