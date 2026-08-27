@@ -70,6 +70,10 @@ interface HeaderProps {
   isTimerOpen: boolean;
   /** PWA 설치 가능 여부 */
   canInstallPwa?: boolean;
+  /** PWA가 이미 설치되었는지 여부 */
+  isInstalled?: boolean;
+  /** PWA standalone(독립 실행) 모드 여부 */
+  isStandalone?: boolean;
   /** PWA 설치 핸들러 */
   onInstallPwa?: () => void;
   /** 오프라인 여부 */
@@ -110,6 +114,8 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleTimer,
   isTimerOpen,
   canInstallPwa,
+  isInstalled = false,
+  isStandalone = false,
   onInstallPwa,
   isOffline = false,
   user = null,
@@ -336,15 +342,29 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
           )}
 
-          {canInstallPwa && onInstallPwa && (
+          {!isStandalone && onInstallPwa && (
             <button
               type="button"
+              id="desktop-pwa-install-btn"
               onClick={onInstallPwa}
-              className="flex items-center gap-1 rounded-full bg-stone-100 px-3 py-1.5 text-xs font-bold text-stone-700 transition hover:bg-orange-100 hover:text-orange-800"
-              title="홈 화면에 앱 설치하기"
+              className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold transition shadow-2xs ${
+                isInstalled
+                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                  : 'bg-orange-50 text-orange-700 border border-orange-200/80 hover:bg-orange-100 hover:text-orange-900'
+              }`}
+              title={isInstalled ? '앱이 이미 설치되어 있습니다' : '홈 화면에 앱 설치하기'}
             >
-              <Download className="h-3.5 w-3.5 text-orange-600" />
-              <span>앱 설치</span>
+              {isInstalled ? (
+                <>
+                  <span className="text-emerald-600 font-black">✓</span>
+                  <span>앱 설치됨</span>
+                </>
+              ) : (
+                <>
+                  <Download className="h-3.5 w-3.5 text-orange-600" />
+                  <span>📲 앱 설치</span>
+                </>
+              )}
             </button>
           )}
         </nav>
@@ -813,6 +833,41 @@ export const Header: React.FC<HeaderProps> = ({
                   <span>데이터 백업 및 복원 (관리자)</span>
                 </button>
               </>
+            )}
+
+            {/* PWA App Install Item (Mobile) */}
+            {!isStandalone && onInstallPwa && (
+              <div className="pt-2 border-t border-stone-100">
+                {isInstalled ? (
+                  <div className="flex items-center justify-between rounded-xl bg-emerald-50 px-3 py-2.5 text-xs font-bold text-emerald-800 border border-emerald-200">
+                    <div className="flex items-center gap-2">
+                      <span className="text-base">🍳</span>
+                      <span>내 입맛 레시피</span>
+                    </div>
+                    <span className="flex items-center gap-1 text-[11px] font-black text-emerald-700 bg-white px-2 py-0.5 rounded-md border border-emerald-200">
+                      ✓ 앱 설치됨
+                    </span>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    id="mobile-pwa-install-btn"
+                    onClick={() => {
+                      setIsMobileMenuOpen(false);
+                      onInstallPwa();
+                    }}
+                    className="w-full flex items-center justify-between rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 px-3.5 py-3 text-xs font-black text-white shadow-md shadow-orange-500/20 active:scale-95 transition"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Download className="h-4 w-4" />
+                      <span>📲 앱 설치 (홈 화면에 추가)</span>
+                    </div>
+                    <span className="text-[10px] bg-white/20 px-2 py-0.5 rounded-md font-bold">
+                      설치하기
+                    </span>
+                  </button>
+                )}
+              </div>
             )}
           </div>
         </div>

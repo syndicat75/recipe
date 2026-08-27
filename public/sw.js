@@ -4,11 +4,15 @@
  * chrome-extension://, non-GET, cross-origin, /api/* 요청 캐싱 차단으로 Cache.put 에러 원천 방지
  */
 
-const CACHE_NAME = 'my-recipe-cache-v2.2';
+const CACHE_NAME = 'my-recipe-cache-v2.3';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
   '/manifest.webmanifest',
+  '/icons/icon-192.png',
+  '/icons/icon-512.png',
+  '/icons/maskable-512.png',
+  '/icons/apple-touch-icon-180.png',
 ];
 
 // 서비스 워커 설치 및 정적 자산 프리캐싱

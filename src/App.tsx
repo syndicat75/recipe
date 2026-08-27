@@ -83,6 +83,8 @@ import { TodayMenuModal } from './components/TodayMenuModal';
 import { WeeklyMealPlanView } from './components/WeeklyMealPlanView';
 import { FamilyShareModal } from './components/FamilyShareModal';
 import { CloudMigrationModal } from './components/CloudMigrationModal';
+import { PwaInstallModal } from './components/PwaInstallModal';
+import { getPwaEnvironment, PwaEnvironmentInfo } from './utils/pwaHelper';
 import { ErrorBoundary } from './components/ErrorBoundary';
 
 type AppViewMode = 'home' | 'ai-chef' | 'meal-plan';
@@ -159,6 +161,9 @@ export default function App(): React.JSX.Element {
   const [isOffline, setIsOffline] = useState<boolean>(!navigator.onLine);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [pwaEnv, setPwaEnv] = useState<PwaEnvironmentInfo>(() => getPwaEnvironment());
+  const [isInstalled, setIsInstalled] = useState<boolean>(() => getPwaEnvironment().isStandalone);
+  const [isPwaInstallModalOpen, setIsPwaInstallModalOpen] = useState<boolean>(false);
 
   // 7. Confirm Dialog State
   const [confirmDialog, setConfirmDialog] = useState<{
@@ -274,33 +279,54 @@ export default function App(): React.JSX.Element {
       setDeferredPrompt(e);
     };
 
+    const handleAppInstalled = (): void => {
+      logger.info('App.pwa', 'PWA 앱 설치 완료 감지(appinstalled)');
+      setIsInstalled(true);
+      setDeferredPrompt(null);
+      showToast('🎉 내 입맛 레시피 앱이 설치되었습니다.', 'success');
+    };
+
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
     window.addEventListener('beforeinstallprompt', handleBeforeInstall);
+    window.addEventListener('appinstalled', handleAppInstalled);
 
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
       window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
+      window.removeEventListener('appinstalled', handleAppInstalled);
     };
   }, [showToast]);
 
   /**
    * PWA 설치 핸들러
+   * 1. deferredPrompt가 존재하는 브라우저(Chrome 등): 네이티브 설치 대화상자 호출
+   * 2. deferredPrompt가 없는 환경(Samsung Internet, iOS Safari 등): 브라우저 맞춤 설치 안내 모달 표시
    */
   const handleInstallPwa = useCallback(async (): Promise<void> => {
-    if (!deferredPrompt) {
-      showToast('💡 이미 설치되었거나 브라우저 메뉴의 "홈 화면에 추가"를 이용해주세요.', 'info');
+    if (deferredPrompt) {
+      try {
+        logger.info('App.handleInstallPwa', 'PWA 네이티브 설치 프롬프트 표시');
+        deferredPrompt.prompt();
+        const { outcome } = await deferredPrompt.userChoice;
+        logger.info('App.handleInstallPwa', `PWA 설치 결과: ${outcome}`);
+        if (outcome === 'accepted') {
+          showToast('🎉 내 입맛 레시피 앱이 설치되었습니다.', 'success');
+          setIsInstalled(true);
+        }
+      } catch (err) {
+        logger.error('App.handleInstallPwa', 'PWA 설치 프롬프트 실행 실패', err);
+        setIsPwaInstallModalOpen(true);
+      } finally {
+        setDeferredPrompt(null);
+      }
       return;
     }
-    logger.info('App.handleInstallPwa', 'PWA 설치 프롬프트 표시');
-    deferredPrompt.prompt();
-    const { outcome } = await deferredPrompt.userChoice;
-    logger.info('App.handleInstallPwa', `PWA 설치 결과: ${outcome}`);
-    if (outcome === 'accepted') {
-      showToast('🎉 앱이 성공적으로 설치되었습니다!', 'success');
-    }
-    setDeferredPrompt(null);
+
+    // deferredPrompt가 없는 경우 (Samsung Internet, iOS Safari, 기타 모바일 환경)
+    logger.info('App.handleInstallPwa', '수동 설치 안내 모달 열기');
+    setIsPwaInstallModalOpen(true);
   }, [deferredPrompt, showToast]);
 
   // 로컬스토리지 데이터 초기 로드
@@ -1201,7 +1227,9 @@ export default function App(): React.JSX.Element {
         onOpenBackupRestore={() => setIsBackupModalOpen(true)}
         onToggleTimer={() => setIsTimerOpen((prev) => !prev)}
         isTimerOpen={isTimerOpen}
-        canInstallPwa={!!deferredPrompt}
+        canInstallPwa={true}
+        isInstalled={isInstalled || pwaEnv.isStandalone}
+        isStandalone={pwaEnv.isStandalone}
         onInstallPwa={handleInstallPwa}
         isOffline={!isOnline || isOffline}
         user={user}
@@ -1629,6 +1657,13 @@ export default function App(): React.JSX.Element {
         onUploadLocal={handleUploadLocalToCloud}
         onMerge={handleMergeLocalAndCloud}
         onUseCloud={handleUseCloudOnly}
+      />
+
+      {/* 12. 📲 PWA App Install Modal (Samsung Internet, iOS Safari, etc.) */}
+      <PwaInstallModal
+        isOpen={isPwaInstallModalOpen}
+        onClose={() => setIsPwaInstallModalOpen(false)}
+        pwaEnv={pwaEnv}
       />
     </div>
   );
