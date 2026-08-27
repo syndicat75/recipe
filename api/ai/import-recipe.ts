@@ -25,7 +25,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   }
 
   try {
-    const { importRecipeFromTextOrUrl } = await import('../../lib/geminiService');
+    const { importRecipeFromTextOrUrl } = await import('../../lib/geminiService.js');
 
     let body = req.body;
     if (typeof body === 'string') {
