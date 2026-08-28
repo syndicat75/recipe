@@ -42,6 +42,50 @@ import { MealSlot } from '../types/recipe';
 import { logger } from '../utils/logger';
 
 /**
+ * Firebase/Firestore 에러를 사용자 친화적인 한국어 안내 메시지로 변환합니다.
+ * 
+ * @param err 원본 에러 객체
+ * @param defaultMessage 기본 대체 메시지
+ * @returns 사용자에게 노출할 안전하고 친절한 한국어 안내 메시지
+ */
+export function formatFamilyError(err: any, defaultMessage: string = '가족 공간 처리 중 오류가 발생했습니다.'): string {
+  logger.debug('familySync.formatFamilyError', '에러 메시지 변환 분석 시작', { code: err?.code, message: err?.message });
+  const code = (err?.code || '').toLowerCase();
+  const message = (err?.message || '').toLowerCase();
+
+  if (
+    code.includes('permission-denied') ||
+    code.includes('permission_denied') ||
+    message.includes('missing or insufficient permissions') ||
+    message.includes('permission-denied') ||
+    message.includes('permission_denied')
+  ) {
+    return '가족 공간 생성 권한이 없습니다.\nFirestore 가족 공유 보안 규칙이 적용되었는지 확인해주세요.';
+  }
+
+  if (
+    code.includes('unauthenticated') ||
+    code.includes('auth/') ||
+    message.includes('unauthenticated') ||
+    message.includes('로그인')
+  ) {
+    return '가족 공간을 만들려면 Google 로그인이 필요합니다.';
+  }
+
+  if (
+    code.includes('unavailable') ||
+    code.includes('network') ||
+    message.includes('network') ||
+    message.includes('offline') ||
+    message.includes('failed to get document')
+  ) {
+    return '네트워크 연결을 확인한 후 다시 시도해주세요.';
+  }
+
+  return err?.message || defaultMessage;
+}
+
+/**
  * 암호학적으로 안전한 초대 코드(예: FAM-8X2K9L)를 생성합니다.
  * @returns 6자리 영문 대문자 + 숫자로 구성된 초대 코드 문자열
  */
@@ -88,10 +132,10 @@ export async function createFamilySpace(
   logger.info('familySync.createFamilySpace', `가족 공간 생성 시도: "${familyName}" (UID: ${uid})`);
 
   if (!db || !isFirebaseReady) {
-    throw new Error('Firestore에 연결되어 있지 않습니다.');
+    throw new Error('Firestore에 연결되어 있지 않습니다. 잠시 후 다시 시도해주세요.');
   }
   if (!uid) {
-    throw new Error('로그인 정보가 유효하지 않습니다.');
+    throw new Error('가족 공간을 만들려면 Google 로그인이 필요합니다.');
   }
 
   const trimmedName = familyName.trim();
@@ -199,7 +243,8 @@ export async function createFamilySpace(
         continue;
       }
       logger.error('familySync.createFamilySpace', '가족 공간 생성 트랜잭션 실패', err);
-      throw err;
+      const friendlyMessage = formatFamilyError(err, '가족 공간 생성에 실패했습니다.');
+      throw new Error(friendlyMessage);
     }
   }
 
@@ -225,86 +270,92 @@ export async function joinFamilyByInviteCode(
   logger.info('familySync.joinFamilyByInviteCode', `가족 공간 참여 시도: 코드 "${inviteCode}" (UID: ${uid})`);
 
   if (!db || !isFirebaseReady) {
-    throw new Error('Firestore에 연결되어 있지 않습니다.');
+    throw new Error('Firestore에 연결되어 있지 않습니다. 잠시 후 다시 시도해주세요.');
   }
   if (!uid) {
-    throw new Error('로그인 정보가 유효하지 않습니다.');
+    throw new Error('가족 공간을 만들려면 Google 로그인이 필요합니다.');
   }
   if (!inviteCode) {
     throw new Error('초대 코드를 입력해주세요.');
   }
 
-  // 1. /familyInvites/{inviteCode} 조회
-  const inviteDocRef = doc(db, 'familyInvites', inviteCode);
-  const inviteSnap = await getDoc(inviteDocRef);
+  try {
+    // 1. /familyInvites/{inviteCode} 조회
+    const inviteDocRef = doc(db, 'familyInvites', inviteCode);
+    const inviteSnap = await getDoc(inviteDocRef);
 
-  if (!inviteSnap.exists()) {
-    logger.warn('familySync.joinFamilyByInviteCode', `존재하지 않는 초대 코드: ${inviteCode}`);
-    throw new Error('유효하지 않은 초대 코드입니다. 코드를 다시 확인해주세요.');
-  }
+    if (!inviteSnap.exists()) {
+      logger.warn('familySync.joinFamilyByInviteCode', `존재하지 않는 초대 코드: ${inviteCode}`);
+      throw new Error('유효하지 않은 초대 코드입니다. 코드를 다시 확인해주세요.');
+    }
 
-  const inviteData = inviteSnap.data() as FamilyInviteDoc;
-  if (!inviteData.active) {
-    logger.warn('familySync.joinFamilyByInviteCode', `비활성화된 초대 코드: ${inviteCode}`);
-    throw new Error('더 이상 사용할 수 없는 초대 코드입니다.');
-  }
+    const inviteData = inviteSnap.data() as FamilyInviteDoc;
+    if (!inviteData.active) {
+      logger.warn('familySync.joinFamilyByInviteCode', `비활성화된 초대 코드: ${inviteCode}`);
+      throw new Error('더 이상 사용할 수 없는 초대 코드입니다.');
+    }
 
-  const familyId = inviteData.familyId;
-  const familyName = inviteData.familyName;
+    const familyId = inviteData.familyId;
+    const familyName = inviteData.familyName;
 
-  // 2. 가족 공간 활성 상태 확인
-  const familyDocRef = doc(db, 'families', familyId);
-  const familySnap = await getDoc(familyDocRef);
-  if (!familySnap.exists() || (familySnap.data() as FamilySpaceDoc).status === 'deleted') {
-    throw new Error('해당 가족 공간을 찾을 수 없거나 이미 삭제되었습니다.');
-  }
+    // 2. 가족 공간 활성 상태 확인
+    const familyDocRef = doc(db, 'families', familyId);
+    const familySnap = await getDoc(familyDocRef);
+    if (!familySnap.exists() || (familySnap.data() as FamilySpaceDoc).status === 'deleted') {
+      throw new Error('해당 가족 공간을 찾을 수 없거나 이미 삭제되었습니다.');
+    }
 
-  const now = Date.now();
-  const batch = writeBatch(db);
+    const now = Date.now();
+    const batch = writeBatch(db);
 
-  // 3. /families/{familyId}/members/{uid} 추가 (기본 role: 'member')
-  const memberDocRef = doc(db, 'families', familyId, 'members', uid);
-  const memberSnap = await getDoc(memberDocRef);
-  const existingRole = memberSnap.exists() ? (memberSnap.data() as FamilyMemberDoc).role : 'member';
+    // 3. /families/{familyId}/members/{uid} 추가 (기본 role: 'member')
+    const memberDocRef = doc(db, 'families', familyId, 'members', uid);
+    const memberSnap = await getDoc(memberDocRef);
+    const existingRole = memberSnap.exists() ? (memberSnap.data() as FamilyMemberDoc).role : 'member';
 
-  const memberData: FamilyMemberDoc = {
-    id: uid,
-    name: userName || '가족 구성원',
-    role: existingRole,
-    avatar: userAvatar,
-    joinedAt: memberSnap.exists() ? (memberSnap.data() as FamilyMemberDoc).joinedAt : now,
-  };
-  batch.set(memberDocRef, memberData, { merge: true });
-
-  // 4. /users/{uid}/familyMemberships/{familyId} 추가
-  const membershipDocRef = doc(db, 'users', uid, 'familyMemberships', familyId);
-  const membershipData: UserFamilyMembershipDoc = {
-    familyId: familyId,
-    role: existingRole,
-    joinedAt: now,
-  };
-  batch.set(membershipDocRef, membershipData, { merge: true });
-
-  // 5. /users/{uid}/familyProfile/profile currentFamilyId 갱신
-  const profileDocRef = doc(db, 'users', uid, 'familyProfile', 'profile');
-  batch.set(
-    profileDocRef,
-    {
+    const memberData: FamilyMemberDoc = {
+      id: uid,
       name: userName || '가족 구성원',
+      role: existingRole,
       avatar: userAvatar,
-      currentFamilyId: familyId,
-      updatedAt: now,
-    },
-    { merge: true }
-  );
+      joinedAt: memberSnap.exists() ? (memberSnap.data() as FamilyMemberDoc).joinedAt : now,
+    };
+    batch.set(memberDocRef, memberData, { merge: true });
 
-  await batch.commit();
-  logger.info('familySync.joinFamilyByInviteCode', `가족 공간 참여 성공: ${familyName} (${familyId})`);
+    // 4. /users/{uid}/familyMemberships/{familyId} 추가
+    const membershipDocRef = doc(db, 'users', uid, 'familyMemberships', familyId);
+    const membershipData: UserFamilyMembershipDoc = {
+      familyId: familyId,
+      role: existingRole,
+      joinedAt: now,
+    };
+    batch.set(membershipDocRef, membershipData, { merge: true });
 
-  return {
-    familyId,
-    familyName,
-  };
+    // 5. /users/{uid}/familyProfile/profile currentFamilyId 갱신
+    const profileDocRef = doc(db, 'users', uid, 'familyProfile', 'profile');
+    batch.set(
+      profileDocRef,
+      {
+        name: userName || '가족 구성원',
+        avatar: userAvatar,
+        currentFamilyId: familyId,
+        updatedAt: now,
+      },
+      { merge: true }
+    );
+
+    await batch.commit();
+    logger.info('familySync.joinFamilyByInviteCode', `가족 공간 참여 성공: ${familyName} (${familyId})`);
+
+    return {
+      familyId,
+      familyName,
+    };
+  } catch (err: any) {
+    logger.error('familySync.joinFamilyByInviteCode', '가족 공간 참여 실패', err);
+    const friendlyMessage = formatFamilyError(err, '가족 공간 참여에 실패했습니다.');
+    throw new Error(friendlyMessage);
+  }
 }
 
 /**
