@@ -193,6 +193,13 @@
 3. **개인화 데이터 격리**:
    - 사용자별 즐겨찾기, 레시피 메모, 장보기 목록은 `users/{uid}/settings/*` 및 `users/{uid}/shoppingList/*`에 독립적으로 격리 동기화됩니다.
 
+### 4.1 공개 레시피 단일 진실 공급원 (Single Source of Truth)
+- **Firestore `/recipes` 우선 동기화**:
+  - 앱 시작 시 Firestore `/recipes`의 실시간 스냅샷(`subscribeToPublicRecipes`)을 무조건 최종 상태로 수신하여 로컬 상태(`recipes`) 및 오프라인 캐시(`localStorage`)에 저장합니다.
+  - 고정 개수(26/27개) 조건 검사나 임의 병합을 제거하여, 관리자가 공개 DB에서 레시피를 삭제하거나 추가했을 때 즉각적이고 정확하게 모든 기기/방문자 화면에 반영됩니다.
+- **관리자 전용 기본 레시피 복구 기능**:
+  - 관리자가 의도치 않게 삭제한 기본 레시피를 복구하고자 할 때, 헤더 사용자 메뉴의 `[기본 시드 레시피 복구]` 버튼을 통해 누락된 원본 시드 레시피만 골라 선택적으로 복원할 수 있습니다.
+
 ### 4.2 Firebase Authentication & Cloud Firestore
 - **Firebase 전용 Named App 격리 (`firebase.ts`)**:
   - `FIREBASE_APP_NAME = 'my-recipe-client'`를 사용하여 기본 `[DEFAULT]` 인스턴스와 격리된 `my-recipe-1569b` 공식 설정을 단일 Source of Truth로 유지.

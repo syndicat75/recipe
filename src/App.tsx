@@ -58,7 +58,8 @@ import {
   fetchCloudSummary,
   migrateLocalDataToCloud,
   migrateAllRecipesToPublicDb,
-  mergeRecipeLists,
+  checkPublicMigrationNeeded,
+  restoreDefaultSeedRecipesToPublic,
 } from './services/firestoreSync';
 import { MigrationModalState } from './types/firebase';
 
@@ -350,30 +351,24 @@ export default function App(): React.JSX.Element {
 
   // 1. 공개 레시피 컬렉션 실시간 구독 (/recipes)
   // 단일 진실 공급원(Single Source of Truth): 로그인 여부와 관계없이 모든 방문자에게 동일한 레시피 제공
+  // Firestore 정상 snapshot 수신 시 개수와 무관하게 incomingPublic을 최종 데이터로 사용합니다.
   useEffect(() => {
     logger.info('App.publicSync', '공개 레시피(/recipes) 실시간 리스너 등록');
     const unsub = subscribeToPublicRecipes(
       (incomingPublic) => {
         logger.info('App.publicSync', `공개 레시피 수신: ${incomingPublic.length}개`);
-        if (incomingPublic.length > 0) {
-          if (incomingPublic.length >= 26) {
-            setRecipes(incomingPublic);
-            saveAllRecipes(incomingPublic);
-          } else {
-            // 마이그레이션 이전 상태인 경우 기존 로컬/시드 레시피와 안전 병합하여 데이터 유실 방지
-            const currentLocal = loadAllRecipes();
-            const merged = mergeRecipeLists(currentLocal, incomingPublic);
-            setRecipes(merged);
-            saveAllRecipes(merged);
-          }
-        } else {
-          // 공개 DB가 비어있는 경우 로컬 캐시/시드 데이터 유지
-          const cached = loadAllRecipes();
-          setRecipes(cached);
+        setRecipes(incomingPublic);
+        const saved = saveAllRecipes(incomingPublic);
+        if (!saved) {
+          logger.warn('App.publicSync', '공개 레시피 로컬 캐시 저장 실패');
         }
       },
       (err) => {
-        logger.warn('App.publicSync', '공개 레시피 구독 에러 (로컬 캐시 레시피 유지)', err);
+        logger.warn('App.publicSync', '공개 레시피 구독 실패 - 기존 캐시 유지', err);
+        const cached = loadAllRecipes();
+        if (cached.length > 0) {
+          setRecipes(cached);
+        }
       }
     );
     return () => {
@@ -421,28 +416,35 @@ export default function App(): React.JSX.Element {
       }
     );
 
-    // 관리자 로그인 시 공개 DB(/recipes) 레시피 수가 27개 미만이면 마이그레이션 모달 제안
+    // 관리자 로그인 시: 아직 공개 DB 마이그레이션을 실행하지 않았고 실제 이전 대상 데이터가 존재할 때만 제안
     if (isAdmin) {
       const adminMigrationKey = `my_recipe_admin_public_migrated_${user.uid}`;
       const isAdminMigrated = localStorage.getItem(adminMigrationKey) === 'true';
 
-      fetchPublicRecipeCount()
-        .then((pubCount) => {
-          logger.info('App.authSync', `공개 레시피 통계: ${pubCount}개`);
-          const currentLocal = loadAllRecipes();
-          if (!isAdminMigrated && pubCount < 27) {
-            setMigrationModal({
-              isOpen: true,
-              mode: 'admin_public',
-              localRecipeCount: currentLocal.length,
-              cloudRecipeCount: pubCount,
-              isMigrating: false,
-            });
-          }
-        })
-        .catch((err) => {
-          logger.error('App.authSync', '공개 레시피 개수 조회 실패', err);
-        });
+      if (!isAdminMigrated) {
+        const currentLocal = loadAllRecipes();
+        checkPublicMigrationNeeded(user.uid, currentLocal)
+          .then(({ needed, privateCount, localLegacyCount }) => {
+            logger.info(
+              'App.authSync',
+              `관리자 마이그레이션 검사: needed=${needed}, 개인=${privateCount}개, 미이전 로컬=${localLegacyCount}개`
+            );
+            if (needed) {
+              fetchPublicRecipeCount().then((pubCount) => {
+                setMigrationModal({
+                  isOpen: true,
+                  mode: 'admin_public',
+                  localRecipeCount: privateCount + localLegacyCount,
+                  cloudRecipeCount: pubCount,
+                  isMigrating: false,
+                });
+              });
+            }
+          })
+          .catch((err) => {
+            logger.error('App.authSync', '공개 레시피 마이그레이션 필요 여부 검사 실패', err);
+          });
+      }
     }
 
     return () => {
@@ -1058,10 +1060,11 @@ export default function App(): React.JSX.Element {
     const currentLocal = loadAllRecipes();
     if (isAdmin) {
       const pubCount = await fetchPublicRecipeCount();
+      const check = await checkPublicMigrationNeeded(user.uid, currentLocal);
       setMigrationModal({
         isOpen: true,
         mode: 'admin_public',
-        localRecipeCount: currentLocal.length,
+        localRecipeCount: check.privateCount + check.localLegacyCount,
         cloudRecipeCount: pubCount,
         isMigrating: false,
       });
@@ -1086,6 +1089,35 @@ export default function App(): React.JSX.Element {
       });
     }
   }, [user, isAdmin, handleGoogleLogin, recipes.length]);
+
+  /**
+   * 관리자 전용: 기본 시드 레시피 명시적 복원 핸들러
+   * - 관리자가 명시적으로 확인한 경우에만 누락된 기본 시드 레시피를 복원합니다.
+   */
+  const handleRestoreDefaultRecipes = useCallback(async () => {
+    if (!isAdmin || !user) return;
+    setConfirmDialog({
+      isOpen: true,
+      title: '기본 레시피 복구',
+      message:
+        '공개 DB에서 누락된 기본 시드 레시피를 복원하시겠습니까? 이미 등록되어 있는 레시피는 영향을 받지 않고 그대로 보존됩니다.',
+      confirmText: '기본 레시피 복구',
+      isDestructive: false,
+      onConfirm: async () => {
+        try {
+          const result = await restoreDefaultSeedRecipesToPublic(user.uid);
+          setConfirmDialog((prev) => ({ ...prev, isOpen: false }));
+          showToast(
+            `🎉 기본 레시피 ${result.restoredCount}개가 복원되었습니다. (총 ${result.totalCount}개)`,
+            'success'
+          );
+        } catch (err) {
+          logger.error('App.handleRestoreDefaultRecipes', '기본 레시피 복원 실패', err);
+          showToast('기본 레시피 복원 중 오류가 발생했습니다.', 'error');
+        }
+      },
+    });
+  }, [isAdmin, user, showToast]);
 
   /**
    * 조리 모드(Focus Mode) 시작
@@ -1290,6 +1322,7 @@ export default function App(): React.JSX.Element {
         onLogin={handleGoogleLogin}
         onLogout={handleLogout}
         onOpenCloudSyncModal={handleManualOpenCloudSyncModal}
+        onRestoreDefaultRecipes={handleRestoreDefaultRecipes}
       />
 
       <main className="flex-1">

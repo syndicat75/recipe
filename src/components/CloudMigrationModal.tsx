@@ -102,7 +102,7 @@ export const CloudMigrationModal: React.FC<CloudMigrationModalProps> = ({
                       기존 개인/로컬 레시피를 공개 레시피 DB로 이전하시겠습니까?
                     </p>
                     <p className="text-xs text-stone-600 mt-1.5 leading-relaxed">
-                      관리자 개인 보관함(<code className="rounded bg-orange-100/80 px-1 py-0.5 font-mono text-orange-900 text-[11px]">users/{'{uid}'}/recipes</code>), 현재 기기(로컬), 기본 26개 시드 레시피를 단일 진실 공급원인 Firestore <code className="rounded bg-orange-100/80 px-1 py-0.5 font-mono text-orange-900 text-[11px]">/recipes</code>로 안전하게 병합합니다.
+                      관리자 개인 보관함(<code className="rounded bg-orange-100/80 px-1 py-0.5 font-mono text-orange-900 text-[11px]">users/{'{uid}'}/recipes</code>) 및 현재 기기의 미이전 레시피를 단일 진실 공급원인 Firestore <code className="rounded bg-orange-100/80 px-1 py-0.5 font-mono text-orange-900 text-[11px]">/recipes</code>로 안전하게 병합합니다.
                     </p>
                   </div>
                 </div>
@@ -110,23 +110,23 @@ export const CloudMigrationModal: React.FC<CloudMigrationModalProps> = ({
 
               <div className="grid grid-cols-2 gap-3">
                 <div className="rounded-2xl border border-stone-200 bg-stone-50 p-3.5 text-center">
-                  <span className="text-[11px] font-bold text-stone-500">현재 Firestore /recipes</span>
+                  <span className="text-[11px] font-bold text-stone-500">현재 공개 DB</span>
                   <div className="text-2xl font-black text-stone-900 mt-0.5">{cloudCount}개</div>
                 </div>
                 <div className="rounded-2xl border border-orange-200 bg-orange-50/70 p-3.5 text-center">
-                  <span className="text-[11px] font-bold text-orange-600">이전 후 예상 총 레시피</span>
-                  <div className="text-2xl font-black text-orange-600 mt-0.5">{Math.max(27, cloudCount, localCount)}개</div>
+                  <span className="text-[11px] font-bold text-orange-600">이전 대상 레시피</span>
+                  <div className="text-2xl font-black text-orange-600 mt-0.5">{localCount}개</div>
                 </div>
               </div>
 
               <div className="rounded-xl bg-stone-50 p-3.5 border border-stone-200/80 text-xs text-stone-600 space-y-2">
                 <div className="flex items-center gap-2 font-bold text-stone-800">
                   <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />
-                  <span>기존 공개 DB 문서는 절대 삭제되지 않고 병합 추가됩니다.</span>
+                  <span>기존 공개 DB 문서는 절대 삭제되지 않고 중복 없이 병합 추가됩니다.</span>
                 </div>
                 <div className="flex items-center gap-2 font-bold text-stone-800">
                   <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />
-                  <span>이전 완료 후 비로그인 방문자 및 모든 기기에서 {Math.max(27, cloudCount, localCount)}개 레시피가 동일하게 조회됩니다.</span>
+                  <span>이전 완료 후 기존 공개 DB와 이전 대상 레시피가 중복 없이 병합되어 모든 기기에서 동일하게 조회됩니다.</span>
                 </div>
               </div>
             </div>

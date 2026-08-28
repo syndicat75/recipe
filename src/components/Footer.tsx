@@ -44,7 +44,7 @@ export const Footer: React.FC = () => {
             {APP_CONFIG.appName} · My Favorite Recipe Book Collection
           </p>
           <div className="mt-4 flex items-center justify-center gap-1 text-[11px] text-stone-400">
-            <span>만든이의 정성이 담긴 26가지 황금비율 레시피</span>
+            <span>만든이의 정성이 담긴 레시피 컬렉션</span>
           </div>
         </div>
       </footer>

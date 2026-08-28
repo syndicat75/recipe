@@ -689,18 +689,95 @@ export function mergeRecipeLists(localRecipes: Recipe[], cloudRecipes: Recipe[])
 }
 
 /**
- * 관리자 전용: 기존 개인/로컬/기본 레시피를 Firestore 공개 DB(/recipes)로 안전하게 병합 이전
+ * 관리자 전용: 공개 DB(/recipes) 마이그레이션 필요 여부를 실제 데이터 기반으로 검사
+ * - 레시피 개수(26/27)가 아닌, 실제 이전 대상(관리자 개인 보관함 또는 미이전 커스텀/로컬 레시피)이 존재하는지 판단합니다.
+ *
+ * @param adminUid 관리자 UID
+ * @param localRecipes 현재 로컬 기기 레시피 목록
+ * @returns { needed, privateCount, localLegacyCount }
+ */
+export async function checkPublicMigrationNeeded(
+  adminUid: string,
+  localRecipes: Recipe[]
+): Promise<{
+  needed: boolean;
+  privateCount: number;
+  localLegacyCount: number;
+}> {
+  logger.info(
+    'firestoreSync.checkPublicMigrationNeeded',
+    `마이그레이션 필요 여부 검사 시작 (Admin UID: ${adminUid}, 로컬 수: ${localRecipes.length})`
+  );
+
+  if (!db || !isFirebaseReady || !adminUid) {
+    return { needed: false, privateCount: 0, localLegacyCount: 0 };
+  }
+
+  let privateCount = 0;
+  let localLegacyCount = 0;
+
+  try {
+    // 1. 관리자 개인 보관함(/users/{adminUid}/recipes) 레시피 개수 조회
+    const userColRef = collection(db, 'users', adminUid, 'recipes');
+    const userSnap = await getDocs(userColRef);
+    privateCount = userSnap.docs.length;
+
+    // 2. 현재 공개 DB(/recipes) ID 집합 조회
+    const publicColRef = collection(db, 'recipes');
+    const publicSnap = await getDocs(publicColRef);
+    const publicIds = new Set<number>();
+    publicSnap.docs.forEach((docSnap) => {
+      const d = docSnap.data();
+      const idNum = Number(d.id || docSnap.id);
+      if (!isNaN(idNum)) {
+        publicIds.add(idNum);
+      }
+    });
+
+    // 3. 로컬 레시피 중 아직 공개 DB에 등록되지 않은 커스텀 또는 private/local 레시피 검색
+    localRecipes.forEach((r) => {
+      if (!publicIds.has(r.id)) {
+        // 커스텀 레시피이거나 명시적 local/private 레시피인 경우에만 이전 대상으로 산정
+        if (r.isCustom || r.syncScope === 'private' || r.syncScope === 'local') {
+          localLegacyCount++;
+        }
+      }
+    });
+
+    // 관리자 개인 컬렉션에 레시피가 1개 이상 존재 OR localStorage에 아직 public DB로 이전되지 않은 legacy/local 데이터 존재
+    const needed = privateCount > 0 || localLegacyCount > 0;
+
+    logger.info(
+      'firestoreSync.checkPublicMigrationNeeded',
+      `마이그레이션 필요 여부 검사 완료: needed=${needed} (개인: ${privateCount}개, 미이전 로컬: ${localLegacyCount}개)`
+    );
+
+    return {
+      needed,
+      privateCount,
+      localLegacyCount,
+    };
+  } catch (err) {
+    logger.error('firestoreSync.checkPublicMigrationNeeded', '마이그레이션 필요 여부 검사 실패', err);
+    return { needed: false, privateCount: 0, localLegacyCount: 0 };
+  }
+}
+
+/**
+ * 관리자 전용: 기존 개인/로컬 레시피를 Firestore 공개 DB(/recipes)로 안전하게 병합 이전
  * 
  * 병합 대상:
- * 1. Firestore /recipes 기존 문서 (절대 삭제 금지, 원본 보존)
- * 2. Firestore /users/{adminUid}/recipes 문서 (관리자 개인 보관함에 들어간 레시피)
- * 3. 로컬 기기 레시피 및 INITIAL_RECIPES(기본 26개 시드 레시피)
+ * 1. Firestore /recipes 기존 공개 문서 (절대 삭제 금지, 원본 완벽 보존)
+ * 2. Firestore /users/{adminUid}/recipes 문서 (관리자 개인 보관함 레시피)
+ * 3. 실제 로컬 기기 미이전 커스텀/로컬 레시피
  * 
- * 처리 방식:
- * - ID 기준으로 중복 없이 스마트 병합
- * - 모든 문서에 syncScope: 'public' 부여
- * - publishAllRecipesToPublic()로 일괄 커밋 (배치 청크)
- * - 기존 데이터 절대 삭제 없음
+ * 데이터 무결성 원칙:
+ * - INITIAL_RECIPES(기본 시드)는 절대로 자동 삽입하지 않습니다 (관리자가 의도적으로 삭제한 레시피의 부활 방지).
+ * - ID 기준으로 중복 없이 스마트 병합하며 모든 문서에 syncScope: 'public' 부여.
+ * 
+ * @param adminUid 관리자 UID
+ * @param localRecipes 로컬 기기 레시피 목록
+ * @returns { totalMerged, publicCount }
  */
 export async function migrateAllRecipesToPublicDb(
   adminUid: string,
@@ -717,26 +794,35 @@ export async function migrateAllRecipesToPublicDb(
 
   const recipeMap = new Map<number, Recipe>();
 
-  // 1. 기본 시드 레시피 26개 삽입 (누락 방지 기본 토대)
-  INITIAL_RECIPES.forEach((r) => {
-    recipeMap.set(r.id, { ...r, syncScope: 'public' });
-  });
+  // 1. Firestore /recipes 기존 공개 문서 먼저 조회 (기존 공개 문서 원본 완벽 보존)
+  try {
+    const publicColRef = collection(db, 'recipes');
+    const publicSnap = await getDocs(publicColRef);
+    logger.info('firestoreSync.migrateAllRecipesToPublicDb', `기존 공개 레시피 조회: ${publicSnap.docs.length}개`);
 
-  // 2. 로컬 기기 레시피 병합
-  localRecipes.forEach((r) => {
-    const existing = recipeMap.get(r.id);
-    if (!existing) {
-      recipeMap.set(r.id, { ...r, syncScope: 'public' });
-    } else {
-      const localUpdated = Number(r.updatedAt || r.createdAt || 0);
-      const existingUpdated = Number(existing.updatedAt || existing.createdAt || 0);
-      if (localUpdated >= existingUpdated || r.isCustom) {
-        recipeMap.set(r.id, { ...existing, ...r, syncScope: 'public' });
-      }
-    }
-  });
+    publicSnap.docs.forEach((docSnap) => {
+      const data = docSnap.data();
+      const id = Number(data.id || docSnap.id);
+      const pubRecipe: Recipe = {
+        ...data,
+        id,
+        name: String(data.name || '무제 레시피'),
+        category: data.category || '기타',
+        ingredients: String(data.ingredients || ''),
+        method: String(data.method || ''),
+        ingredientCount: Number(data.ingredientCount || 0),
+        stepCount: Number(data.stepCount || 0),
+        icon: String(data.icon || '🍳'),
+        syncScope: 'public',
+      } as Recipe;
 
-  // 3. Firestore /users/{adminUid}/recipes 조회 및 병합
+      recipeMap.set(id, pubRecipe);
+    });
+  } catch (err) {
+    logger.error('firestoreSync.migrateAllRecipesToPublicDb', '기존 공개 레시피 조회 오류', err);
+  }
+
+  // 2. Firestore /users/{adminUid}/recipes 조회 및 병합 (개인 보관함 레시피)
   if (adminUid) {
     try {
       const userColRef = collection(db, 'users', adminUid, 'recipes');
@@ -775,39 +861,22 @@ export async function migrateAllRecipesToPublicDb(
     }
   }
 
-  // 4. Firestore /recipes 기존 공개 문서 조회 및 병합 (기존 공개 문서 절대 덮어써서 날아가지 않도록 보존)
-  try {
-    const publicColRef = collection(db, 'recipes');
-    const publicSnap = await getDocs(publicColRef);
-    logger.info('firestoreSync.migrateAllRecipesToPublicDb', `기존 공개 레시피 조회: ${publicSnap.docs.length}개`);
-
-    publicSnap.docs.forEach((docSnap) => {
-      const data = docSnap.data();
-      const id = Number(data.id || docSnap.id);
-      const pubRecipe: Recipe = {
-        ...data,
-        id,
-        name: String(data.name || '무제 레시피'),
-        category: data.category || '기타',
-        ingredients: String(data.ingredients || ''),
-        method: String(data.method || ''),
-        ingredientCount: Number(data.ingredientCount || 0),
-        stepCount: Number(data.stepCount || 0),
-        icon: String(data.icon || '🍳'),
-        syncScope: 'public',
-      } as Recipe;
-
-      const existing = recipeMap.get(id);
-      if (!existing) {
-        recipeMap.set(id, pubRecipe);
-      } else {
-        // 기존 공개 DB 버전 우선 병합
-        recipeMap.set(id, { ...existing, ...pubRecipe, syncScope: 'public' });
+  // 3. 로컬 기기 레시피 중 미이전 커스텀/로컬 레시피 병합
+  localRecipes.forEach((r) => {
+    const existing = recipeMap.get(r.id);
+    if (!existing) {
+      // 의도적으로 삭제된 기본 레시피 부활을 방지하기 위해 오직 커스텀이거나 private/local인 경우에만 이전
+      if (r.isCustom || r.syncScope === 'private' || r.syncScope === 'local') {
+        recipeMap.set(r.id, { ...r, syncScope: 'public' });
       }
-    });
-  } catch (err) {
-    logger.error('firestoreSync.migrateAllRecipesToPublicDb', '기존 공개 레시피 조회 오류', err);
-  }
+    } else {
+      const localUpdated = Number(r.updatedAt || r.createdAt || 0);
+      const existingUpdated = Number(existing.updatedAt || existing.createdAt || 0);
+      if (localUpdated > existingUpdated && r.isCustom) {
+        recipeMap.set(r.id, { ...existing, ...r, syncScope: 'public' });
+      }
+    }
+  });
 
   const mergedList = Array.from(recipeMap.values());
   logger.info(
@@ -815,12 +884,57 @@ export async function migrateAllRecipesToPublicDb(
     `최종 병합된 공개 레시피 수: ${mergedList.length}개 -> publishAllRecipesToPublic 실행`
   );
 
-  // 5. 공개 컬렉션(/recipes)으로 일괄 커밋
+  // 4. 공개 컬렉션(/recipes)으로 일괄 커밋
   await publishAllRecipesToPublic(mergedList);
 
   return {
     totalMerged: mergedList.length,
     publicCount: mergedList.length,
+  };
+}
+
+/**
+ * 관리자 전용 명시적 기능: 기본 시드 레시피 복원
+ * - 자동 실행되지 않으며, 관리자가 명시적으로 복원을 승인하고 실행한 경우에만 호출됩니다.
+ * - 현재 공개 DB(/recipes)에 누락된 기본 시드 레시피만 골라 보충합니다.
+ *
+ * @param adminUid 관리자 UID
+ * @returns { restoredCount, totalCount } 복원된 레시피 수 및 전체 레시피 수
+ */
+export async function restoreDefaultSeedRecipesToPublic(
+  adminUid: string
+): Promise<{ restoredCount: number; totalCount: number }> {
+  logger.info('firestoreSync.restoreDefaultSeedRecipesToPublic', `기본 시드 레시피 복원 실행 (Admin: ${adminUid})`);
+
+  if (!db || !isFirebaseReady) {
+    throw new Error('Firestore에 연결할 수 없습니다.');
+  }
+
+  const publicColRef = collection(db, 'recipes');
+  const publicSnap = await getDocs(publicColRef);
+  const recipeMap = new Map<number, Recipe>();
+
+  publicSnap.docs.forEach((d) => {
+    const data = d.data();
+    const id = Number(data.id || d.id);
+    recipeMap.set(id, { ...data, id, syncScope: 'public' } as Recipe);
+  });
+
+  let restoredCount = 0;
+  INITIAL_RECIPES.forEach((seed) => {
+    if (!recipeMap.has(seed.id)) {
+      recipeMap.set(seed.id, { ...seed, syncScope: 'public', updatedAt: Date.now() });
+      restoredCount++;
+    }
+  });
+
+  const allRecipes = Array.from(recipeMap.values());
+  await publishAllRecipesToPublic(allRecipes);
+
+  logger.info('firestoreSync.restoreDefaultSeedRecipesToPublic', `시드 복원 완료: 추가 ${restoredCount}개, 총 ${allRecipes.length}개`);
+  return {
+    restoredCount,
+    totalCount: allRecipes.length,
   };
 }
 

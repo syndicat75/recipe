@@ -10,16 +10,16 @@ import { logger } from './logger';
 
 /**
  * 로컬스토리지에서 전체 레시피 목록을 조회합니다.
- * 최초 실행 시 INITIAL_RECIPES 26개를 시드하여 로컬스토리지에 저장 후 반환합니다.
+ * 로컬 캐시가 없는 최초 실행 시에만 초기 시드를 생성하여 저장 후 반환합니다.
  * @returns 레시피 배열
  */
 export function loadAllRecipes(): Recipe[] {
   logger.info('storage.loadAllRecipes', '전체 레시피 로드 시도');
   try {
     const raw = localStorage.getItem(APP_CONFIG.storageKeys.allRecipes);
-    if (raw) {
+    if (raw !== null) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) {
+      if (Array.isArray(parsed)) {
         logger.info('storage.loadAllRecipes', `로컬스토리지에서 ${parsed.length}개 레시피 로드 완료`);
         return parsed;
       }
