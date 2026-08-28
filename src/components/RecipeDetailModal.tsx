@@ -43,6 +43,8 @@ interface RecipeDetailModalProps {
   isBookmarked: boolean;
   /** 사용자 레시피 메모 */
   userNote?: string;
+  /** 가족 공간 공유 여부 */
+  isFamilyShared?: boolean;
   /** 북마크 토글 핸들러 */
   onToggleBookmark: (recipeId: number) => void;
   /** 모달 닫기 핸들러 */
@@ -76,6 +78,7 @@ export const RecipeDetailModal: React.FC<RecipeDetailModalProps> = ({
   recipe,
   isBookmarked,
   userNote = '',
+  isFamilyShared = false,
   onToggleBookmark,
   onClose,
   onAddShoppingItem,
@@ -648,22 +651,22 @@ ${userNote ? `\n[📝 나의 메모]\n${userNote}` : ''}`;
           {/* Custom Recipe Management (Edit / Delete / Family Share) */}
           <div className="flex flex-wrap items-center justify-between gap-3 pt-4 border-t border-stone-200/60">
             <div className="flex items-center gap-2">
-              {isAdmin && onToggleFamilyShare && (
+              {onToggleFamilyShare && (
                 <button
                   type="button"
                   onClick={() => onToggleFamilyShare(recipe)}
                   className={`flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-bold transition-all ${
-                    recipe.sharedWithFamily
-                      ? 'bg-emerald-100 text-emerald-800 ring-1 ring-emerald-300'
+                    isFamilyShared
+                      ? 'bg-emerald-100 text-emerald-800 ring-1 ring-emerald-300 shadow-xs'
                       : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
                   }`}
                 >
-                  {recipe.sharedWithFamily ? (
+                  {isFamilyShared ? (
                     <Users className="h-3.5 w-3.5 text-emerald-600" />
                   ) : (
                     <Lock className="h-3.5 w-3.5 text-stone-400" />
                   )}
-                  <span>{recipe.sharedWithFamily ? '👨‍👩‍👧 가족 공유 중' : '🔒 나만 보기'}</span>
+                  <span>{isFamilyShared ? '👨‍👩‍👧 가족 공간에 공유 중' : '👨‍👩‍👧 가족에게 공유하기'}</span>
                 </button>
               )}
             </div>

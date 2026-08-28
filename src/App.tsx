@@ -13,8 +13,6 @@ import {
   ShoppingItem,
   SortOption,
   ToastMessage,
-  FamilySpace,
-  FamilyUserProfile,
   WeeklyMealPlan,
   MealPlanEntry,
   SaveRecipeResult,
@@ -32,15 +30,12 @@ import {
   saveAllRecipeNotes,
   getRecentRecipeIds,
   addRecentRecipeId,
-  loadFamilyProfile,
-  saveFamilyProfile,
-  loadFamilySpaces,
-  saveFamilySpaces,
   loadWeeklyMealPlan,
   saveWeeklyMealPlan,
 } from './utils/storage';
 import { logger } from './utils/logger';
 import { useFirebaseAuth } from './hooks/useFirebaseAuth';
+import { useFamilySync } from './hooks/useFamilySync';
 import { isUserAdmin } from './utils/admin';
 import {
   subscribeToPublicRecipes,
@@ -130,14 +125,34 @@ export default function App(): React.JSX.Element {
     isMigrating: false,
   });
 
-  // 2. Family Sharing State
-  const [userProfile, setUserProfile] = useState<FamilyUserProfile>(loadFamilyProfile());
-  const [allFamilySpacesList, setAllFamilySpacesList] = useState<FamilySpace[]>(loadFamilySpaces());
-
-  const activeFamilySpace = useMemo(() => {
-    if (!userProfile.currentFamilyId) return null;
-    return allFamilySpacesList.find((s) => s.familyId === userProfile.currentFamilyId) || null;
-  }, [userProfile.currentFamilyId, allFamilySpacesList]);
+  // 2. Cloud Firestore Family Sharing Sync (단일 진실 공급원)
+  const {
+    familyProfile,
+    activeFamily,
+    members: familyMembers,
+    sharedRecipeIds,
+    familyMealPlanEntries,
+    familyShoppingItems,
+    isFamilyOwner,
+    isSyncing: isFamilySyncing,
+    syncError: familySyncError,
+    isCreating: isFamilyCreating,
+    isJoining: isFamilyJoining,
+    isLeaving: isFamilyLeaving,
+    createFamily,
+    joinFamily,
+    leaveFamily,
+    unshareRecipe,
+    toggleShareRecipe,
+    addMealPlanEntry: addFamilyMealPlanEntry,
+    deleteMealPlanEntry: deleteFamilyMealPlanEntry,
+    addShoppingItem: addFamilyShoppingItem,
+    toggleShoppingItem: toggleFamilyShoppingItem,
+    deleteShoppingItem: deleteFamilyShoppingItem,
+    transferOwnership: transferFamilyOwnership,
+    deleteFamilySpace,
+    updateProfile: updateFamilyUserProfile,
+  } = useFamilySync(user);
 
   // 3. View & Routing State
   const [currentView, setCurrentView] = useState<AppViewMode>('home');
@@ -247,6 +262,49 @@ export default function App(): React.JSX.Element {
     window.addEventListener('hashchange', handleHashChange);
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);
+
+  // 🔗 가족 초대 링크(?familyInvite=FAM-XXXXXX) 감지 및 처리
+  useEffect(() => {
+    try {
+      const searchParams = new URLSearchParams(window.location.search);
+      const inviteCode = searchParams.get('familyInvite');
+
+      if (inviteCode && inviteCode.trim()) {
+        const cleanCode = inviteCode.trim().toUpperCase();
+        logger.info('App.inviteLink', `가족 초대 링크 감지: ${cleanCode}`);
+
+        // URL 쿼리 파라미터 깔끔하게 제거
+        searchParams.delete('familyInvite');
+        const newSearch = searchParams.toString() ? `?${searchParams.toString()}` : '';
+        const newUrl = `${window.location.pathname}${newSearch}${window.location.hash}`;
+        window.history.replaceState({}, document.title, newUrl);
+
+        if (!user) {
+          showToast('👨‍👩‍👧 가족 공간 초대를 받았습니다. Google 로그인 후 바로 참여해보세요!', 'info');
+          setIsFamilyShareModalOpen(true);
+        } else {
+          // 이미 해당 가족에 참여 중인지 확인
+          if (activeFamily?.inviteCode === cleanCode) {
+            showToast(`이미 '${activeFamily.name}' 가족 공간에 참여 중입니다.`, 'info');
+          } else {
+            showToast(`👨‍👩‍👧 초대 코드(${cleanCode})로 가족 공간에 참여합니다...`, 'info');
+            joinFamily(cleanCode)
+              .then((res) => {
+                showToast(`🎉 '${res.familyName}' 가족 공간에 참여했습니다!`, 'success');
+                setIsFamilyShareModalOpen(true);
+              })
+              .catch((err: any) => {
+                logger.error('App.inviteLink', '초대 코드 참여 실패', err);
+                showToast(err.message || '가족 공간 참여에 실패했습니다.', 'error');
+                setIsFamilyShareModalOpen(true);
+              });
+          }
+        }
+      }
+    } catch (err) {
+      logger.error('App.inviteLink', '초대 링크 처리 중 오류', err);
+    }
+  }, [user, activeFamily, joinFamily, showToast]);
 
   /**
    * 뷰 전환 핸들러
@@ -635,54 +693,6 @@ export default function App(): React.JSX.Element {
     [isAdmin, user, bookmarkedIds, userNotes, showToast]
   );
 
-  /**
-   * 레시피 가족 공유 상태 개별 토글
-   */
-  const handleToggleFamilyShareRecipe = useCallback((recipe: Recipe): void => {
-    const nextShared = !recipe.sharedWithFamily;
-    logger.info('App.handleToggleFamilyShareRecipe', `가족 공유 상태 변경: ${recipe.name} -> ${nextShared}`);
-
-    setRecipes((prev) => {
-      const next = prev.map((r) => (r.id === recipe.id ? { ...r, sharedWithFamily: nextShared } : r));
-      saveAllRecipes(next);
-      return next;
-    });
-
-    if (selectedRecipe && selectedRecipe.id === recipe.id) {
-      setSelectedRecipe((prev) => (prev ? { ...prev, sharedWithFamily: nextShared } : null));
-    }
-
-    if (isAdmin) {
-      savePublicRecipe({ ...recipe, sharedWithFamily: nextShared }).catch((err) => {
-        logger.error('App.handleToggleFamilyShareRecipe', '클라우드 공유 상태 동기화 실패', err);
-      });
-    }
-
-    showToast(
-      nextShared
-        ? `👨‍👩‍👧 '${recipe.name}'이(가) 가족 공간에 공유되었습니다.`
-        : `🔒 '${recipe.name}'이(가) 나만 보기로 전환되었습니다.`,
-      'success'
-    );
-  }, [isAdmin, selectedRecipe, showToast]);
-
-  /**
-   * 내 레시피 전체 일괄 가족 공유
-   */
-  const handleShareAllMyRecipes = useCallback((): void => {
-    logger.info('App.handleShareAllMyRecipes', '내 모든 레시피 일괄 가족 공유');
-    setRecipes((prev) => {
-      const next = prev.map((r) => ({ ...r, sharedWithFamily: true }));
-      saveAllRecipes(next);
-      if (isAdmin) {
-        publishAllRecipesToPublic(next).catch((err) => {
-          logger.error('App.handleShareAllMyRecipes', '클라우드 일괄 공유 저장 실패', err);
-        });
-      }
-      return next;
-    });
-    showToast('👨‍👩‍👧 모든 레시피가 가족 공간에 공유되었습니다!', 'success');
-  }, [isAdmin, showToast]);
 
   /**
    * 주간 식단표 저장 핸들러
@@ -1130,130 +1140,58 @@ export default function App(): React.JSX.Element {
   }, []);
 
   /**
-   * 새 가족 공간 생성
+   * 개별 레시피 가족 공유 토글 핸들러
    */
-  const handleCreateFamilySpace = useCallback(
-    (name: string, shareExisting: boolean): void => {
-      const code = `FAM-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
-      const familyId = `fam_${Date.now()}`;
-      const newSpace: FamilySpace = {
-        familyId,
-        name,
-        inviteCode: code,
-        ownerId: userProfile.id,
-        members: [
-          {
-            id: userProfile.id,
-            name: userProfile.name,
-            role: 'owner',
-            avatar: userProfile.avatar,
-            joinedAt: Date.now(),
-          },
-        ],
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      };
+  const handleToggleFamilyShare = useCallback(
+    async (recipe: Recipe): Promise<void> => {
+      if (!user) {
+        showToast('👨‍👩‍👧 가족 공유를 사용하려면 Google 로그인이 필요합니다.', 'info');
+        setIsFamilyShareModalOpen(true);
+        return;
+      }
+      if (!activeFamily) {
+        showToast('가족 공간을 먼저 만들거나 초대 코드로 참여해주세요.', 'info');
+        setIsFamilyShareModalOpen(true);
+        return;
+      }
 
-      const allSpaces = [...allFamilySpacesList, newSpace];
-      setAllFamilySpacesList(allSpaces);
-      saveFamilySpaces(allSpaces);
-
-      const updatedProfile: FamilyUserProfile = {
-        ...userProfile,
-        currentFamilyId: familyId,
-      };
-      setUserProfile(updatedProfile);
-      saveFamilyProfile(updatedProfile);
-
-      if (shareExisting) {
-        handleShareAllMyRecipes();
+      try {
+        const isNowShared = await toggleShareRecipe(recipe.id);
+        showToast(
+          isNowShared
+            ? `👨‍👩‍👧 '${recipe.name}' 레시피가 '${activeFamily.name}' 공간에 공유되었습니다!`
+            : `'${recipe.name}' 레시피 공유가 해제되었습니다.`,
+          'success'
+        );
+      } catch (err: any) {
+        logger.error('App.handleToggleFamilyShare', '가족 레시피 공유 토글 실패', err);
+        showToast(err.message || '가족 공유 처리에 실패했습니다.', 'error');
       }
     },
-    [userProfile, allFamilySpacesList, handleShareAllMyRecipes]
+    [user, activeFamily, toggleShareRecipe, showToast]
   );
 
   /**
-   * 초대 코드로 가족 공간 참여
+   * 내 모든 레시피 일괄 가족 공유
    */
-  const handleJoinFamilySpace = useCallback(
-    (inviteCode: string, shareExisting: boolean): void => {
-      const matched = allFamilySpacesList.find((s) => s.inviteCode === inviteCode);
-      const targetSpace: FamilySpace = matched || {
-        familyId: `fam_${inviteCode}`,
-        name: '우리 가족의 식탁',
-        inviteCode,
-        ownerId: 'owner_user',
-        members: [
-          { id: 'owner_user', name: '가족 대표', role: 'owner', avatar: '👩‍🍳', joinedAt: Date.now() - 86400000 },
-          { id: userProfile.id, name: userProfile.name, role: 'member', avatar: userProfile.avatar, joinedAt: Date.now() },
-        ],
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      };
-
-      if (!targetSpace.members.some((m) => m.id === userProfile.id)) {
-        targetSpace.members.push({
-          id: userProfile.id,
-          name: userProfile.name,
-          role: 'member',
-          avatar: userProfile.avatar,
-          joinedAt: Date.now(),
-        });
+  const handleShareAllMyRecipes = useCallback(async (): Promise<void> => {
+    if (!user || !activeFamily) {
+      showToast('참여 중인 가족 공간이 없습니다.', 'info');
+      return;
+    }
+    try {
+      showToast('가족 공간에 레시피를 일괄 공유하는 중...', 'info');
+      for (const r of recipes) {
+        if (!sharedRecipeIds.has(r.id)) {
+          await toggleShareRecipe(r.id);
+        }
       }
-
-      const updatedSpaces = allFamilySpacesList.some((s) => s.familyId === targetSpace.familyId)
-        ? allFamilySpacesList.map((s) => (s.familyId === targetSpace.familyId ? targetSpace : s))
-        : [...allFamilySpacesList, targetSpace];
-
-      setAllFamilySpacesList(updatedSpaces);
-      saveFamilySpaces(updatedSpaces);
-
-      const updatedProfile: FamilyUserProfile = {
-        ...userProfile,
-        currentFamilyId: targetSpace.familyId,
-      };
-      setUserProfile(updatedProfile);
-      saveFamilyProfile(updatedProfile);
-
-      if (shareExisting) {
-        handleShareAllMyRecipes();
-      }
-
-      showToast(`'${targetSpace.name}' 가족 공간에 참여했습니다!`, 'success');
-    },
-    [allFamilySpacesList, userProfile, handleShareAllMyRecipes, showToast]
-  );
-
-  /**
-   * 가족 공간 나가기
-   */
-  const handleLeaveFamilySpace = useCallback(
-    (familyId: string): void => {
-      const updatedProfile: FamilyUserProfile = {
-        ...userProfile,
-        currentFamilyId: null,
-      };
-      setUserProfile(updatedProfile);
-      saveFamilyProfile(updatedProfile);
-
-      const nextSpaces = allFamilySpacesList.filter((s) => s.familyId !== familyId);
-      setAllFamilySpacesList(nextSpaces);
-      saveFamilySpaces(nextSpaces);
-      showToast('가족 공간에서 나왔습니다.', 'info');
-    },
-    [userProfile, allFamilySpacesList, showToast]
-  );
-
-  /**
-   * 프로필 닉네임 변경
-   */
-  const handleUpdateUserProfileName = useCallback((newName: string): void => {
-    setUserProfile((prev) => {
-      const next = { ...prev, name: newName };
-      saveFamilyProfile(next);
-      return next;
-    });
-  }, []);
+      showToast(`🎉 모든 레시피가 '${activeFamily.name}' 가족 공간에 공유되었습니다!`, 'success');
+    } catch (err: any) {
+      logger.error('App.handleShareAllMyRecipes', '전체 공유 실패', err);
+      showToast('일부 레시피 공유에 실패했습니다.', 'error');
+    }
+  }, [user, activeFamily, recipes, sharedRecipeIds, toggleShareRecipe, showToast]);
 
   /**
    * 백업 복원 완료 핸들러
@@ -1306,7 +1244,7 @@ export default function App(): React.JSX.Element {
         onOpenImportRecipe={() => setIsImportModalOpen(true)}
         onOpenTodayMenu={() => setIsTodayMenuModalOpen(true)}
         onOpenFamilyShare={() => setIsFamilyShareModalOpen(true)}
-        currentFamilyName={activeFamilySpace ? activeFamilySpace.name : null}
+        currentFamilyName={activeFamily ? activeFamily.name : null}
         onOpenBackupRestore={() => setIsBackupModalOpen(true)}
         onToggleTimer={() => setIsTimerOpen((prev) => !prev)}
         isTimerOpen={isTimerOpen}
@@ -1450,9 +1388,11 @@ export default function App(): React.JSX.Element {
                     </div>
                     <div>
                       <h4 className="font-soft text-xs font-black text-stone-900">
-                        {activeFamilySpace ? activeFamilySpace.name : '가족 공유 공간'}
+                        {activeFamily ? activeFamily.name : '가족 공유 공간'}
                       </h4>
-                      <p className="text-[10px] text-stone-500">레시피·식단 함께 보기</p>
+                      <p className="text-[10px] text-stone-500">
+                        {activeFamily ? `${familyMembers.length}명 참여 중` : '레시피·식단 함께 보기'}
+                      </p>
                     </div>
                   </button>
                 </div>
@@ -1507,6 +1447,7 @@ export default function App(): React.JSX.Element {
                 activeCategory={activeCategory}
                 searchQuery={searchQuery}
                 bookmarkedIds={bookmarkedIds}
+                sharedRecipeIds={sharedRecipeIds}
                 sortOption={sortOption}
                 onSortChange={setSortOption}
                 onToggleBookmark={handleToggleBookmark}
@@ -1573,6 +1514,7 @@ export default function App(): React.JSX.Element {
           recipe={selectedRecipe}
           isBookmarked={bookmarkedIds.includes(selectedRecipe.id)}
           userNote={userNotes[selectedRecipe.id] || ''}
+          isFamilyShared={sharedRecipeIds.has(selectedRecipe.id)}
           onClose={() => setSelectedRecipe(null)}
           onToggleBookmark={handleToggleBookmark}
           onAddShoppingItem={handleAddShoppingItem}
@@ -1591,7 +1533,7 @@ export default function App(): React.JSX.Element {
           }}
           onDeleteRecipe={handleDeleteRecipeRequest}
           onSaveNote={handleSaveRecipeNote}
-          onToggleFamilyShare={handleToggleFamilyShareRecipe}
+          onToggleFamilyShare={handleToggleFamilyShare}
           isAdmin={isAdmin}
           showToast={showToast}
         />
@@ -1669,19 +1611,33 @@ export default function App(): React.JSX.Element {
         showToast={showToast}
       />
 
-      {/* 6. 👨‍👩‍👧 Family Share Modal */}
+      {/* 6. 👨‍👩‍👧 Family Share Modal (Cloud Firestore 실시간 연동) */}
       <FamilyShareModal
         isOpen={isFamilyShareModalOpen}
         onClose={() => setIsFamilyShareModalOpen(false)}
-        userProfile={userProfile}
-        currentFamilySpace={activeFamilySpace}
-        allFamilySpaces={allFamilySpacesList}
-        userRecipes={recipes}
-        onCreateFamilySpace={handleCreateFamilySpace}
-        onJoinFamilySpace={handleJoinFamilySpace}
-        onLeaveFamilySpace={handleLeaveFamilySpace}
-        onUpdateUserProfileName={handleUpdateUserProfileName}
-        onShareAllMyRecipes={handleShareAllMyRecipes}
+        user={user}
+        onLogin={handleGoogleLogin}
+        familyProfile={familyProfile}
+        activeFamily={activeFamily}
+        members={familyMembers}
+        sharedRecipeIds={sharedRecipeIds}
+        familyMealPlanEntries={familyMealPlanEntries}
+        familyShoppingItems={familyShoppingItems}
+        allRecipes={recipes}
+        isFamilyOwner={isFamilyOwner}
+        isSyncing={isFamilySyncing}
+        syncError={familySyncError}
+        isCreating={isFamilyCreating}
+        isJoining={isFamilyJoining}
+        isLeaving={isFamilyLeaving}
+        onCreateFamily={createFamily}
+        onJoinFamily={joinFamily}
+        onLeaveFamily={leaveFamily}
+        onUnshareRecipe={unshareRecipe}
+        onTransferOwnership={transferFamilyOwnership}
+        onDeleteFamilySpace={deleteFamilySpace}
+        onUpdateProfile={updateFamilyUserProfile}
+        onSelectRecipe={handleOpenDetail}
         showToast={showToast}
       />
 

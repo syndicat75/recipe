@@ -18,6 +18,8 @@ interface RecipeListProps {
   searchQuery: string;
   /** 북마크 ID 목록 */
   bookmarkedIds: number[];
+  /** 가족 공간에 공유된 레시피 ID 집합 */
+  sharedRecipeIds?: Set<number>;
   /** 정렬 옵션 */
   sortOption: SortOption;
   /** 정렬 옵션 변경 핸들러 */
@@ -42,6 +44,7 @@ export const RecipeList: React.FC<RecipeListProps> = ({
   activeCategory,
   searchQuery,
   bookmarkedIds,
+  sharedRecipeIds,
   sortOption,
   onSortChange,
   onToggleBookmark,
@@ -119,6 +122,7 @@ export const RecipeList: React.FC<RecipeListProps> = ({
               key={recipe.id}
               recipe={recipe}
               isBookmarked={bookmarkedIds.includes(recipe.id)}
+              isFamilyShared={sharedRecipeIds?.has(recipe.id)}
               onToggleBookmark={onToggleBookmark}
               onOpenDetail={onOpenDetail}
               isAdmin={isAdmin}

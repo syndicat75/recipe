@@ -14,6 +14,8 @@ interface RecipeCardProps {
   recipe: Recipe;
   /** 북마크 여부 */
   isBookmarked: boolean;
+  /** 가족 공간 공유 여부 */
+  isFamilyShared?: boolean;
   /** 북마크 토글 이벤트 핸들러 */
   onToggleBookmark: (recipeId: number) => void;
   /** 레시피 상세 모달 열기 이벤트 핸들러 */
@@ -28,6 +30,7 @@ interface RecipeCardProps {
 export const RecipeCard: React.FC<RecipeCardProps> = ({
   recipe,
   isBookmarked,
+  isFamilyShared = false,
   onToggleBookmark,
   onOpenDetail,
   isAdmin = false,
@@ -160,7 +163,7 @@ export const RecipeCard: React.FC<RecipeCardProps> = ({
             </h3>
 
             {/* Meta Info (Time & Difficulty) */}
-            <div className="mt-2 flex items-center gap-3 text-xs text-stone-500">
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-stone-500">
               {recipe.cookingTimeMinutes && (
                 <span className="flex items-center gap-1">
                   <Clock className="h-3.5 w-3.5 text-stone-400" />
@@ -171,6 +174,11 @@ export const RecipeCard: React.FC<RecipeCardProps> = ({
                 <span className="flex items-center gap-1">
                   <Flame className="h-3.5 w-3.5 text-orange-500" />
                   <span>{recipe.difficulty}</span>
+                </span>
+              )}
+              {isFamilyShared && (
+                <span className="rounded-md bg-rose-50 border border-rose-200/60 px-1.5 py-0.5 text-[10px] font-bold text-rose-700 flex items-center gap-0.5" title="우리 가족 공유 레시피">
+                  👨‍👩‍👧 가족 공유
                 </span>
               )}
               {isAdmin && (

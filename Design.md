@@ -55,12 +55,19 @@
 │   └── favicon.svg                 # 앱 파비콘
 ├── src/
 │   ├── types/
-│   │   ├── recipe.ts               # 레시피, 식단표, 타이머, 가족 공간 등 타입 정의
+│   │   ├── recipe.ts               # 레시피, 식단표, 타이머, 구 가족 타입 정의
+│   │   ├── family.ts               # Firestore 실시간 가족 공유 스키마 및 문서 타입 정의
 │   │   └── firebase.ts             # Firebase Auth 및 사용자 타입 정의
 │   ├── config/
 │   │   └── appConfig.ts            # 카테고리, 모델명, AI 엔드포인트, 스토리지 키
 │   ├── data/
 │   │   └── initialRecipes.ts       # 기본 26개 시드 레시피 데이터셋
+│   ├── services/
+│   │   ├── familySync.ts           # Cloud Firestore 가족 공유 실시간 동기화 서비스
+│   │   └── firestoreSync.ts        # 개인 사용자 설정 클라우드 동기화 서비스
+│   ├── hooks/
+│   │   ├── useFirebaseAuth.ts      # Firebase Google Authentication 훅
+│   │   └── useFamilySync.ts        # Cloud Firestore 실시간 가족 공간 동기화 훅
 │   ├── utils/
 │   │   ├── aiApiHelper.ts          # 안전한 AI API 호출 및 JSON 파싱 헬퍼
 │   │   ├── logger.ts               # 구조화된 디버그/인포 로거
@@ -150,14 +157,28 @@
   - 사진이 흐릿하여 판독 신뢰도가 낮은 항목(`lowConfidenceFields`)은 ⚠️ 노란색 강조 안내를 표시하여 저장 전 사용자 확인 유도.
   - 원본 사진 보관 옵션 선택 시 레시피 상세에서 촬영한 원본 사진을 언제든 다시 열람 가능.
 
-### 3.6 👨‍👩‍👧 가족 공유 공간 (`FamilyShareModal.tsx`)
-- **가족 공간 생성 및 초대**:
-  - "우리집 맛있는 부엌" 등 공간 이름 지정 후 6자리 초대 코드(`FAM-XXXXXX`) 자동 생성.
-  - 초대 링크/코드 클립보드 원클릭 복사.
-- **가족 참여 & 레시피 공유**:
-  - 코드로 가족 공간 참여 시 "내 기존 레시피 공유하기" 옵션 제공.
-  - 개별 레시피 단위로 `🔒 나만 보기` vs `👨‍👩‍👧 가족 공간에 공유` 토글 지원.
-  - 가족 공간 참여 중인 경우 상단 헤더에 가족 공간 이름 배지 표시.
+### 3.6 👨‍👩‍👧 가족 공유 공간 (`FamilyShareModal.tsx` & `useFamilySync.ts`)
+- **Cloud Firestore 기반 다기기 실시간 동기화**:
+  - 기존 `localStorage` 중심의 로컬 시뮬레이션을 전면 대체하여 Google 계정 로그인 기반의 실제 Firestore 다기기 실시간 공유 환경 구축.
+  - 가족 A가 PC에서 공간 생성 후 초대 코드를 발송하면, 가족 B가 모바일에서 초대 링크(`?familyInvite=FAM-XXXXXX`) 또는 코드로 즉시 참여하여 동일한 공간을 공유.
+- **가족 공간 스키마 & 서브 컬렉션 구조**:
+  - `/families/{familyId}`: 가족 공간 메타 정보 (이름, 초대코드, 방장 UID, 생성/수정 일시)
+  - `/families/{familyId}/members/{memberUid}`: 실시간 구성원 목록 (닉네임, 역할, 아바타 이모지, 참여일시)
+  - `/families/{familyId}/recipes/{recipeId}`: 가족 공유 레시피 참조 키 (공유자 UID, 공유 일시 - 공개 `/recipes` 훼손 없이 안전 분리)
+  - `/families/{familyId}/mealPlans/{entryId}`: 가족 주간 식단표 (날짜, 슬롯, 레시피 ID, 인분, 생성자)
+  - `/families/{familyId}/shoppingList/{itemId}`: 실시간 가족 장보기 목록 (텍스트, 완료 여부, 등록자)
+  - `/familyInvites/{inviteCode}`: 초대 코드 조회 및 중복 방지 인덱스 문서
+  - `/users/{uid}/familyProfile/info`: 사용자별 참여 중인 `currentFamilyId` 및 프로필 정보
+  - `/users/{uid}/familyMemberships/{familyId}`: 사용자가 가입된 가족 목록
+- **레시피 공유 관리**:
+  - 개별 레시피 단위로 `🔒 나만 보기` vs `👨‍👩‍👧 가족 공간에 공유` 실시간 토글 지원.
+  - 레시피 카드에 `👨‍👩‍👧 가족 공유` 배지 실시간 표시.
+  - 모달 내에서 우리 가족 공유 레시피 전체 모아보기 및 원클릭 상세 열람 지원.
+- **방장 권한 관리 & 가족 나가기**:
+  - 방장(Owner)은 다른 가족 구성원에게 방장 권한을 안전하게 위임(Ownership Transfer)하거나 공간 삭제 가능.
+  - 일반 구성원은 언제든 가족 공간을 자유롭게 나갈 수 있으며, 나간 사용자의 레시피는 자동으로 정리됨.
+- **자동 초대 링크 처리**:
+  - `?familyInvite=FAM-XXXXXX` URL 파라미터 감지 시 Google 로그인 여부를 확인하여 로그인된 경우 즉시 가족 참여 실행, 비로그인 시 친절한 로그인 안내 후 자동 합류 처리.
 
 ---
 

@@ -77,6 +77,7 @@ export interface SaveRecipeResult {
  * 식단 식사 시간 슬롯 타입
  */
 export type MealSlotType = 'breakfast' | 'lunch' | 'dinner' | 'single';
+export type MealSlot = MealSlotType;
 
 /**
  * 단일 식단 항목 인터페이스
