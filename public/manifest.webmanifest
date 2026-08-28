@@ -1,7 +1,7 @@
 {
   "id": "/",
   "name": "내 입맛 레시피",
-  "short_name": "내입맛레시피",
+  "short_name": "내 입맛",
   "description": "내가 좋아하는 음식 레시피를 관리하고 조리하는 나만의 레시피 북",
   "start_url": "/",
   "scope": "/",

@@ -631,7 +631,7 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* Mobile Dropdown Menu */}
       {isMobileMenuOpen && (
-        <div className="border-t border-orange-100 bg-white/98 p-4 shadow-xl md:hidden animate-fade-in space-y-3">
+        <div className="border-t border-orange-100 bg-white/98 p-4 shadow-xl md:hidden animate-fade-in space-y-3 max-h-[calc(100vh-4rem)] overflow-y-auto">
           {/* Mobile Auth Banner */}
           {user ? (
             <div className="flex items-center justify-between rounded-2xl bg-orange-50/80 p-3 border border-orange-100">
@@ -714,16 +714,30 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
           )}
 
+          {/* Core Navigation Items (홈, 오늘 뭐 먹지, 주간 식단표, AI 요리사, 즐겨찾기, 가족 공간) */}
           <div className="grid grid-cols-2 gap-2 pb-2 border-b border-stone-100">
+            <button
+              type="button"
+              onClick={() => {
+                if (onNavigateView) onNavigateView('home');
+                scrollToSection('home');
+                setIsMobileMenuOpen(false);
+              }}
+              className="flex items-center gap-2 rounded-xl bg-stone-50 p-2.5 text-xs font-black text-stone-800 hover:bg-orange-50 hover:text-orange-900 transition"
+            >
+              <Home className="h-4 w-4 text-orange-500 shrink-0" />
+              <span>홈</span>
+            </button>
+
             <button
               type="button"
               onClick={() => {
                 onOpenTodayMenu();
                 setIsMobileMenuOpen(false);
               }}
-              className="flex items-center gap-2 rounded-xl bg-orange-50 p-2.5 text-xs font-black text-orange-800"
+              className="flex items-center gap-2 rounded-xl bg-orange-50 p-2.5 text-xs font-black text-orange-800 hover:bg-orange-100 transition"
             >
-              <Dice5 className="h-4 w-4 text-orange-500" />
+              <Dice5 className="h-4 w-4 text-orange-500 shrink-0" />
               <span>🎲 오늘 뭐 먹지?</span>
             </button>
 
@@ -733,9 +747,9 @@ export const Header: React.FC<HeaderProps> = ({
                 if (onNavigateView) onNavigateView('meal-plan');
                 setIsMobileMenuOpen(false);
               }}
-              className="flex items-center gap-2 rounded-xl bg-amber-50 p-2.5 text-xs font-black text-amber-800"
+              className="flex items-center gap-2 rounded-xl bg-amber-50 p-2.5 text-xs font-black text-amber-800 hover:bg-amber-100 transition"
             >
-              <Calendar className="h-4 w-4 text-amber-500" />
+              <Calendar className="h-4 w-4 text-amber-500 shrink-0" />
               <span>📅 주간 식단표</span>
             </button>
 
@@ -745,10 +759,22 @@ export const Header: React.FC<HeaderProps> = ({
                 if (onNavigateView) onNavigateView('ai-chef');
                 setIsMobileMenuOpen(false);
               }}
-              className="flex items-center gap-2 rounded-xl bg-orange-100/70 p-2.5 text-xs font-black text-orange-900"
+              className="flex items-center gap-2 rounded-xl bg-orange-100/70 p-2.5 text-xs font-black text-orange-900 hover:bg-orange-200/80 transition"
             >
-              <Sparkles className="h-4 w-4 text-orange-600" />
+              <Sparkles className="h-4 w-4 text-orange-600 shrink-0" />
               <span>✨ AI 요리사</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                handleNavClick('즐겨찾기');
+                setIsMobileMenuOpen(false);
+              }}
+              className="flex items-center gap-2 rounded-xl bg-amber-50/70 p-2.5 text-xs font-black text-amber-900 hover:bg-amber-100 transition"
+            >
+              <Bookmark className="h-4 w-4 text-amber-500 shrink-0" />
+              <span>즐겨찾기 ({bookmarkCount})</span>
             </button>
 
             <button
@@ -757,56 +783,38 @@ export const Header: React.FC<HeaderProps> = ({
                 onOpenFamilyShare();
                 setIsMobileMenuOpen(false);
               }}
-              className="flex items-center gap-2 rounded-xl bg-rose-50 p-2.5 text-xs font-black text-rose-800"
+              className="flex items-center gap-2 rounded-xl bg-rose-50 p-2.5 text-xs font-black text-rose-800 hover:bg-rose-100 transition"
             >
-              <Users className="h-4 w-4 text-rose-500" />
+              <Users className="h-4 w-4 text-rose-500 shrink-0" />
               <span>👨‍👩‍👧 가족 공간</span>
             </button>
           </div>
 
-          <div className="flex flex-col gap-1 pt-1">
-            <button
-              type="button"
-              onClick={() => {
-                if (onNavigateView) onNavigateView('home');
-                scrollToSection('home');
-              }}
-              className="flex items-center gap-2 rounded-xl p-2.5 text-xs font-bold text-stone-700 hover:bg-stone-50"
-            >
-              <Home className="h-4 w-4 text-orange-500" />
-              <span>홈으로</span>
-            </button>
-
+          <div className="flex flex-col gap-1 pt-0.5">
             <button
               type="button"
               onClick={() => handleNavClick('전체')}
-              className="flex items-center gap-2 rounded-xl p-2.5 text-xs font-bold text-stone-700 hover:bg-stone-50"
+              className="flex items-center gap-2 rounded-xl p-2.5 text-xs font-bold text-stone-700 hover:bg-stone-50 transition"
             >
               <BookOpen className="h-4 w-4 text-stone-500" />
               <span>전체 레시피 둘러보기</span>
             </button>
 
-            <button
-              type="button"
-              onClick={() => handleNavClick('즐겨찾기')}
-              className="flex items-center gap-2 rounded-xl p-2.5 text-xs font-bold text-stone-700 hover:bg-stone-50"
-            >
-              <Bookmark className="h-4 w-4 text-amber-500" />
-              <span>즐겨찾기 ({bookmarkCount})</span>
-            </button>
-
             {isAdmin && (
-              <>
+              <div className="my-1 pt-2 border-t border-stone-100 space-y-1">
+                <div className="text-[10px] font-bold text-orange-600 px-2 mb-1">
+                  관리자 도구
+                </div>
                 <button
                   type="button"
                   onClick={() => {
                     onOpenAddRecipe();
                     setIsMobileMenuOpen(false);
                   }}
-                  className="flex items-center gap-2 rounded-xl p-2.5 text-xs font-black text-orange-700 bg-orange-50 hover:bg-orange-100"
+                  className="w-full flex items-center gap-2 rounded-xl p-2.5 text-xs font-black text-orange-700 bg-orange-50 hover:bg-orange-100 transition"
                 >
                   <PlusCircle className="h-4 w-4 text-orange-600" />
-                  <span>새 레시피 등록 (관리자)</span>
+                  <span>새 레시피 등록</span>
                 </button>
 
                 <button
@@ -815,10 +823,10 @@ export const Header: React.FC<HeaderProps> = ({
                     onOpenImportRecipe();
                     setIsMobileMenuOpen(false);
                   }}
-                  className="flex items-center gap-2 rounded-xl p-2.5 text-xs font-bold text-stone-700 hover:bg-stone-50"
+                  className="w-full flex items-center gap-2 rounded-xl p-2.5 text-xs font-bold text-stone-700 hover:bg-stone-50 transition"
                 >
                   <Camera className="h-4 w-4 text-orange-500" />
-                  <span>레시피 가져오기 / 사진 인식 (관리자)</span>
+                  <span>레시피 가져오기 / 사진 인식</span>
                 </button>
 
                 <button
@@ -827,24 +835,24 @@ export const Header: React.FC<HeaderProps> = ({
                     onOpenBackupRestore();
                     setIsMobileMenuOpen(false);
                   }}
-                  className="flex items-center gap-2 rounded-xl p-2.5 text-xs font-bold text-stone-700 hover:bg-stone-50"
+                  className="w-full flex items-center gap-2 rounded-xl p-2.5 text-xs font-bold text-stone-700 hover:bg-stone-50 transition"
                 >
                   <Database className="h-4 w-4 text-stone-500" />
-                  <span>데이터 백업 및 복원 (관리자)</span>
+                  <span>데이터 백업 및 복원</span>
                 </button>
-              </>
+              </div>
             )}
 
-            {/* PWA App Install Item (Mobile) */}
+            {/* 📲 PWA App Install Item (Mobile) - Standalone 모드가 아닐 때 항상 표시 */}
             {!isStandalone && onInstallPwa && (
               <div className="pt-2 border-t border-stone-100">
                 {isInstalled ? (
-                  <div className="flex items-center justify-between rounded-xl bg-emerald-50 px-3 py-2.5 text-xs font-bold text-emerald-800 border border-emerald-200">
+                  <div className="flex items-center justify-between rounded-xl bg-emerald-50 px-3.5 py-2.5 text-xs font-bold text-emerald-800 border border-emerald-200">
                     <div className="flex items-center gap-2">
                       <span className="text-base">🍳</span>
                       <span>내 입맛 레시피</span>
                     </div>
-                    <span className="flex items-center gap-1 text-[11px] font-black text-emerald-700 bg-white px-2 py-0.5 rounded-md border border-emerald-200">
+                    <span className="flex items-center gap-1 text-[11px] font-black text-emerald-700 bg-white px-2 py-0.5 rounded-md border border-emerald-200 shadow-2xs">
                       ✓ 앱 설치됨
                     </span>
                   </div>
@@ -860,10 +868,10 @@ export const Header: React.FC<HeaderProps> = ({
                   >
                     <div className="flex items-center gap-2">
                       <Download className="h-4 w-4" />
-                      <span>📲 앱 설치 (홈 화면에 추가)</span>
+                      <span>📲 앱 설치</span>
                     </div>
                     <span className="text-[10px] bg-white/20 px-2 py-0.5 rounded-md font-bold">
-                      설치하기
+                      홈 화면에 추가
                     </span>
                   </button>
                 )}

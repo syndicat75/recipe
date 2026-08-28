@@ -228,6 +228,26 @@
 ### 4.4 완전한 백업/복원
 - 전체 데이터를 JSON으로 내보내고 다른 기기에서 병합/복원 가능.
 
+### 4.5 PWA 크로스 플랫폼 설치 아키텍처 (PC, Android, Samsung, iOS)
+1. **PWA 실행 상태 정밀 감지 (`src/utils/pwaHelper.ts`)**:
+   - `checkIsStandalone()`: `window.matchMedia('(display-mode: standalone)').matches` 및 iOS의 `navigator.standalone === true`를 종합 판별.
+   - PWA Standalone 모드로 실행 중일 때는 불필요한 설치 버튼/메뉴를 자동으로 숨김.
+2. **Android Chrome 지원**:
+   - `beforeinstallprompt` 이벤트를 `deferredPrompt` 상태에 보관.
+   - 설치 버튼 클릭 시 네이티브 `deferredPrompt.prompt()` 및 `deferredPrompt.userChoice` 실행.
+   - 설치 성공 시 `🎉 내 입맛 레시피 앱이 설치되었습니다.` 토스트 안내 및 `isInstalled=true` 갱신.
+   - `appinstalled` 이벤트를 리스닝하여 설치 즉시 상태 동기화.
+3. **Samsung Internet 지원**:
+   - `navigator.userAgent`에 `SamsungBrowser` 정규식 매칭을 통해 삼성 인터넷 감지.
+   - `deferredPrompt`가 없더라도 설치가 실패하지 않고, 삼성 인터넷 전용 맞춤 안내 모달 제공 (`☰ 메뉴` → `현재 페이지 추가` / `앱 추가` → `홈 화면`).
+4. **iPhone / iPad Safari 지원**:
+   - `navigator.userAgent`에 `/iPhone|iPad|iPod/i` 매칭을 통해 iOS 감지.
+   - 자동 프롬프트를 시도하지 않고, Safari 전용 설치 안내 모달 제공 (하단 공유 버튼 `□↑` → `홈 화면에 추가` → `추가`).
+5. **기타 브라우저 Fallback & 모바일 햄버거 메뉴 항상 표시**:
+   - `canInstallPwa` 조건을 `!isInstalled && !isStandalone`으로 설정하여 자동 프롬프트가 지원되지 않는 모바일 환경에서도 항상 모바일 햄버거 메뉴 및 AboutSection에 `📲 앱 설치` 메뉴 제공.
+   - 이미 설치 완료 시 `✓ 앱 설치됨` 뱃지 표시.
+   - 설치 안내 모달(`PwaInstallModal.tsx`)에서 브라우저 탭(Chrome, 삼성 인터넷, iPhone/Safari, 기타 브라우저)을 자유롭게 전환하며 단계별 안내 확인 가능.
+
 ---
 
 ## 5. UI/UX 디자인 가이드라인

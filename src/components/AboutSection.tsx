@@ -18,6 +18,8 @@ interface AboutSectionProps {
   onInstallPwa?: () => void;
   /** PWA 설치 가능 여부 */
   canInstallPwa?: boolean;
+  /** PWA 설치 완료 여부 */
+  isInstalled?: boolean;
   /** 관리자 여부 */
   isAdmin?: boolean;
 }
@@ -31,6 +33,7 @@ export const AboutSection: React.FC<AboutSectionProps> = ({
   onOpenImportRecipe,
   onInstallPwa,
   canInstallPwa,
+  isInstalled = false,
   isAdmin = false,
 }) => {
   logger.debug('AboutSection', '이용안내 섹션 렌더링');
@@ -152,9 +155,9 @@ export const AboutSection: React.FC<AboutSectionProps> = ({
 
           {/* Card 4: PWA 오프라인 사용 */}
           <div
-            onClick={canInstallPwa && onInstallPwa ? onInstallPwa : undefined}
+            onClick={!isInstalled && onInstallPwa ? onInstallPwa : undefined}
             className={`group flex flex-col justify-between rounded-[1.75rem] border border-orange-100 bg-[#fffaf3] p-6 transition duration-300 hover:-translate-y-1 hover:border-orange-200 hover:shadow-lg hover:shadow-orange-950/5 ${
-              canInstallPwa && onInstallPwa ? 'cursor-pointer' : ''
+              !isInstalled && onInstallPwa ? 'cursor-pointer' : ''
             }`}
           >
             <div>
@@ -168,7 +171,11 @@ export const AboutSection: React.FC<AboutSectionProps> = ({
                 홈 화면에 앱으로 바로 설치하고, 인터넷 연결이 불안정한 환경에서도 저장된 레시피와 장보기 목록을 안심하고 사용하세요.
               </p>
             </div>
-            {canInstallPwa && onInstallPwa && (
+            {isInstalled ? (
+              <div className="mt-4 pt-3 border-t border-emerald-200/40 text-xs font-bold text-emerald-600 flex items-center gap-1.5">
+                <span>✓ 앱 설치됨</span>
+              </div>
+            ) : onInstallPwa && (
               <div className="mt-4 pt-3 border-t border-emerald-200/40 text-xs font-bold text-emerald-600 group-hover:text-emerald-700">
                 홈 화면에 설치하기 →
               </div>

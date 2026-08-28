@@ -1502,7 +1502,8 @@ export default function App(): React.JSX.Element {
                 onOpenShoppingList={() => setIsShoppingModalOpen(true)}
                 onOpenImportRecipe={() => setIsImportModalOpen(true)}
                 onInstallPwa={handleInstallPwa}
-                canInstallPwa={!!deferredPrompt}
+                canInstallPwa={!isInstalled && !pwaEnv.isStandalone}
+                isInstalled={isInstalled || pwaEnv.isStandalone}
               />
             </>
           )}
