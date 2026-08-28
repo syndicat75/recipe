@@ -40,6 +40,7 @@ import {
 } from '../types/family';
 import { MealSlot } from '../types/recipe';
 import { logger } from '../utils/logger';
+import { removeUndefinedDeep } from '../utils/firestoreSanitizer';
 
 /**
  * Firebase/Firestore 에러를 사용자 친화적인 한국어 안내 메시지로 변환합니다.
@@ -175,7 +176,7 @@ export async function createFamilySpace(
           createdAt: now,
           updatedAt: now,
         };
-        transaction.set(newFamilyDocRef, familyDocData);
+        transaction.set(newFamilyDocRef, removeUndefinedDeep(familyDocData));
 
         // 2. /families/{familyId}/members/{uid} 생성 (owner)
         const memberDocRef = doc(db, 'families', familyId, 'members', uid);
@@ -186,7 +187,7 @@ export async function createFamilySpace(
           avatar: creatorAvatar,
           joinedAt: now,
         };
-        transaction.set(memberDocRef, memberDocData);
+        transaction.set(memberDocRef, removeUndefinedDeep(memberDocData));
 
         // 3. /familyInvites/{inviteCode} 생성
         const inviteDocData: FamilyInviteDoc = {
@@ -197,7 +198,7 @@ export async function createFamilySpace(
           active: true,
           createdAt: now,
         };
-        transaction.set(inviteDocRef, inviteDocData);
+        transaction.set(inviteDocRef, removeUndefinedDeep(inviteDocData));
 
         // 4. /users/{uid}/familyMemberships/{familyId} 생성
         const membershipDocRef = doc(db, 'users', uid, 'familyMemberships', familyId);
@@ -206,18 +207,18 @@ export async function createFamilySpace(
           role: 'owner',
           joinedAt: now,
         };
-        transaction.set(membershipDocRef, membershipData);
+        transaction.set(membershipDocRef, removeUndefinedDeep(membershipData));
 
         // 5. /users/{uid}/familyProfile/profile currentFamilyId 갱신
         const profileDocRef = doc(db, 'users', uid, 'familyProfile', 'profile');
         transaction.set(
           profileDocRef,
-          {
+          removeUndefinedDeep({
             name: creatorName || '가족 대표',
             avatar: creatorAvatar,
             currentFamilyId: familyId,
             updatedAt: now,
-          },
+          }),
           { merge: true }
         );
       });
@@ -320,7 +321,7 @@ export async function joinFamilyByInviteCode(
       avatar: userAvatar,
       joinedAt: memberSnap.exists() ? (memberSnap.data() as FamilyMemberDoc).joinedAt : now,
     };
-    batch.set(memberDocRef, memberData, { merge: true });
+    batch.set(memberDocRef, removeUndefinedDeep(memberData), { merge: true });
 
     // 4. /users/{uid}/familyMemberships/{familyId} 추가
     const membershipDocRef = doc(db, 'users', uid, 'familyMemberships', familyId);
@@ -329,18 +330,18 @@ export async function joinFamilyByInviteCode(
       role: existingRole,
       joinedAt: now,
     };
-    batch.set(membershipDocRef, membershipData, { merge: true });
+    batch.set(membershipDocRef, removeUndefinedDeep(membershipData), { merge: true });
 
     // 5. /users/{uid}/familyProfile/profile currentFamilyId 갱신
     const profileDocRef = doc(db, 'users', uid, 'familyProfile', 'profile');
     batch.set(
       profileDocRef,
-      {
+      removeUndefinedDeep({
         name: userName || '가족 구성원',
         avatar: userAvatar,
         currentFamilyId: familyId,
         updatedAt: now,
-      },
+      }),
       { merge: true }
     );
 
@@ -675,7 +676,7 @@ export async function saveFamilyMealPlanEntry(
     updatedAt: now,
   };
 
-  await setDoc(docRef, data, { merge: true });
+  await setDoc(docRef, removeUndefinedDeep(data), { merge: true });
   logger.info('familySync.saveFamilyMealPlanEntry', `가족 식단 항목 저장 완료 (ID: ${docRef.id})`);
   return docRef.id;
 }
@@ -779,7 +780,7 @@ export async function saveFamilyShoppingItem(
     updatedAt: now,
   };
 
-  await setDoc(docRef, data);
+  await setDoc(docRef, removeUndefinedDeep(data));
   logger.info('familySync.saveFamilyShoppingItem', `가족 장보기 추가 완료 (ID: ${docRef.id})`);
   return docRef.id;
 }
@@ -803,10 +804,10 @@ export async function updateFamilyShoppingItem(
   }
 
   const docRef = doc(db, 'families', familyId, 'shoppingItems', itemId);
-  await updateDoc(docRef, {
+  await updateDoc(docRef, removeUndefinedDeep({
     ...updates,
     updatedAt: Date.now(),
-  });
+  }));
   logger.info('familySync.updateFamilyShoppingItem', `가족 장보기 수정 완료: ${itemId}`);
 }
 
@@ -1007,7 +1008,7 @@ export async function updateFamilyProfile(
     updates.currentFamilyId = currentFamilyId;
   }
 
-  await setDoc(profileDocRef, updates, { merge: true });
+  await setDoc(profileDocRef, removeUndefinedDeep(updates), { merge: true });
 
   // 현재 활성 가족 공간이 있다면 members 컬렉션 내 본인 정보도 함께 갱신
   if (currentFamilyId) {
@@ -1015,10 +1016,10 @@ export async function updateFamilyProfile(
     try {
       const snap = await getDoc(memberDocRef);
       if (snap.exists()) {
-        await updateDoc(memberDocRef, {
+        await updateDoc(memberDocRef, removeUndefinedDeep({
           name: name.trim() || '가족 구성원',
           avatar: avatar || '👤',
-        });
+        }));
       }
     } catch (err) {
       logger.warn('familySync.updateFamilyProfile', '가족 멤버 문서 갱신 비차단 경고', err);

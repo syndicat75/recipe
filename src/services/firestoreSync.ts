@@ -22,6 +22,7 @@ import { Recipe, ShoppingItem } from '../types/recipe';
 import { CloudDataSummary, UserSettingsDoc } from '../types/firebase';
 import { INITIAL_RECIPES } from '../data/initialRecipes';
 import { logger } from '../utils/logger';
+import { removeUndefinedDeep } from '../utils/firestoreSanitizer';
 
 /**
  * 1. 공개 레시피 컬렉션 실시간 구독 (/recipes)
@@ -114,12 +115,12 @@ export async function savePublicRecipe(recipe: Recipe): Promise<void> {
   }
 
   const recipeDocRef = doc(db, 'recipes', String(recipe.id));
-  const recipePayload = {
+  const recipePayload = removeUndefinedDeep({
     ...recipe,
     id: recipe.id,
     syncScope: 'public',
     updatedAt: Date.now(),
-  };
+  });
 
   await setDoc(recipeDocRef, recipePayload, { merge: true });
 }
@@ -160,16 +161,13 @@ export async function publishAllRecipesToPublic(recipes: Recipe[]): Promise<void
 
     chunk.forEach((recipe) => {
       const docRef = doc(db, 'recipes', String(recipe.id));
-      batch.set(
-        docRef,
-        {
-          ...recipe,
-          id: recipe.id,
-          syncScope: 'public',
-          updatedAt: Date.now(),
-        },
-        { merge: true }
-      );
+      const payload = removeUndefinedDeep({
+        ...recipe,
+        id: recipe.id,
+        syncScope: 'public',
+        updatedAt: Date.now(),
+      });
+      batch.set(docRef, payload, { merge: true });
     });
 
     await batch.commit();
@@ -348,16 +346,13 @@ export async function savePrivateRecipe(uid: string, recipe: Recipe): Promise<vo
   }
 
   const ref = doc(db, 'users', uid, 'recipes', String(recipe.id));
-  await setDoc(
-    ref,
-    {
-      ...recipe,
-      id: recipe.id,
-      syncScope: 'private',
-      updatedAt: Date.now(),
-    },
-    { merge: true }
-  );
+  const payload = removeUndefinedDeep({
+    ...recipe,
+    id: recipe.id,
+    syncScope: 'private',
+    updatedAt: Date.now(),
+  });
+  await setDoc(ref, payload, { merge: true });
 }
 
 /**
@@ -415,14 +410,11 @@ export async function saveBookmarksToCloud(uid: string, bookmarks: number[]): Pr
   if (!db || !isFirebaseReady) return;
 
   const settingsDocRef = doc(db, 'users', uid, 'settings', 'data');
-  await setDoc(
-    settingsDocRef,
-    {
-      bookmarks,
-      updatedAt: Date.now(),
-    },
-    { merge: true }
-  );
+  const payload = removeUndefinedDeep({
+    bookmarks,
+    updatedAt: Date.now(),
+  });
+  await setDoc(settingsDocRef, payload, { merge: true });
 }
 
 /**
@@ -456,14 +448,11 @@ export async function saveRecipeNoteToCloud(
   });
 
   const settingsDocRef = doc(db, 'users', uid, 'settings', 'data');
-  await setDoc(
-    settingsDocRef,
-    {
-      notes: serializedNotes,
-      updatedAt: Date.now(),
-    },
-    { merge: true }
-  );
+  const payload = removeUndefinedDeep({
+    notes: serializedNotes,
+    updatedAt: Date.now(),
+  });
+  await setDoc(settingsDocRef, payload, { merge: true });
 }
 
 /**
@@ -478,7 +467,8 @@ export async function saveShoppingItemToCloud(uid: string, item: ShoppingItem): 
   if (!db || !isFirebaseReady) return;
 
   const itemDocRef = doc(db, 'users', uid, 'shoppingItems', item.id);
-  await setDoc(itemDocRef, item, { merge: true });
+  const payload = removeUndefinedDeep(item);
+  await setDoc(itemDocRef, payload, { merge: true });
 }
 
 /**
@@ -521,7 +511,8 @@ export async function syncAllShoppingItemsToCloud(uid: string, items: ShoppingIt
 
   items.forEach((item) => {
     const docRef = doc(db, 'users', uid, 'shoppingItems', item.id);
-    batch.set(docRef, item, { merge: true });
+    const payload = removeUndefinedDeep(item);
+    batch.set(docRef, payload, { merge: true });
   });
 
   await batch.commit();
@@ -601,16 +592,13 @@ export async function migrateLocalDataToCloud(
     const recipeBatch = writeBatch(db);
     chunk.forEach((recipe) => {
       const docRef = doc(db, 'users', uid, 'recipes', String(recipe.id));
-      recipeBatch.set(
-        docRef,
-        {
-          ...recipe,
-          id: recipe.id,
-          syncScope: 'private',
-          updatedAt: Date.now(),
-        },
-        { merge: true }
-      );
+      const payload = removeUndefinedDeep({
+        ...recipe,
+        id: recipe.id,
+        syncScope: 'private',
+        updatedAt: Date.now(),
+      });
+      recipeBatch.set(docRef, payload, { merge: true });
     });
     await recipeBatch.commit();
   }
@@ -619,7 +607,8 @@ export async function migrateLocalDataToCloud(
   const batch = writeBatch(db);
   localShopping.forEach((item) => {
     const docRef = doc(db, 'users', uid, 'shoppingItems', item.id);
-    batch.set(docRef, item, { merge: true });
+    const payload = removeUndefinedDeep(item);
+    batch.set(docRef, payload, { merge: true });
   });
 
   // 3. 설정 및 즐겨찾기, 메모 등록
@@ -629,17 +618,14 @@ export async function migrateLocalDataToCloud(
   });
 
   const settingsRef = doc(db, 'users', uid, 'settings', 'data');
-  batch.set(
-    settingsRef,
-    {
-      bookmarks: localBookmarks,
-      notes: serializedNotes,
-      migrationCompleted: true,
-      migratedAt: Date.now(),
-      updatedAt: Date.now(),
-    },
-    { merge: true }
-  );
+  const settingsPayload = removeUndefinedDeep({
+    bookmarks: localBookmarks,
+    notes: serializedNotes,
+    migrationCompleted: true,
+    migratedAt: Date.now(),
+    updatedAt: Date.now(),
+  });
+  batch.set(settingsRef, settingsPayload, { merge: true });
 
   await batch.commit();
   logger.info('firestoreSync.migrateLocalDataToCloud', '로컬 데이터 개인 클라우드 마이그레이션 완료');

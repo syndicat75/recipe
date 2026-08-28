@@ -83,6 +83,7 @@
 │   ├── utils/
 │   │   ├── admin.ts                # 관리자 UID/이메일 판별 유틸
 │   │   ├── aiApiHelper.ts          # 안전한 AI API 호출 및 JSON 파싱 헬퍼
+│   │   ├── firestoreSanitizer.ts   # Firestore undefined 필드 재귀적 제거 및 에러 포맷팅 유틸
 │   │   ├── logger.ts               # 구조화된 디버그/인포 로거
 │   │   ├── pwaHelper.ts            # PWA 브라우저 환경 및 standalone 감지 헬퍼
 │   │   ├── scaler.ts               # 인분 수 수학적 분량/분수 정밀 계산 엔진

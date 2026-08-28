@@ -13,6 +13,7 @@ import {
   deletePublicRecipe,
 } from '../services/firestoreSync';
 import { logger } from '../utils/logger';
+import { formatFirestoreError } from '../utils/firestoreSanitizer';
 
 export interface UsePublicRecipesOptions {
   /** 관리자 여부 */
@@ -114,12 +115,13 @@ export function usePublicRecipes({
         await savePublicRecipe(normalizedRecipe);
       } catch (err) {
         logger.error('usePublicRecipes.saveRecipe', '공개 레시피 클라우드 저장 실패', err);
+        const friendlyMessage = formatFirestoreError(err, '공개 레시피 클라우드 저장에 실패했습니다.');
         if (showToast) {
-          showToast('공개 레시피 클라우드 저장에 실패했습니다. 네트워크 상태를 확인해주세요.', 'error');
+          showToast(friendlyMessage, 'error');
         }
         return {
           success: false,
-          error: '공개 레시피 클라우드 저장에 실패했습니다.',
+          error: friendlyMessage,
         };
       }
 
@@ -161,8 +163,9 @@ export function usePublicRecipes({
         return true;
       } catch (err) {
         logger.error('usePublicRecipes.deleteRecipe', '공개 레시피 삭제 실패', err);
+        const friendlyMessage = formatFirestoreError(err, '공개 레시피 삭제 중 오류가 발생했습니다.');
         if (showToast) {
-          showToast('공개 레시피 삭제 중 오류가 발생했습니다.', 'error');
+          showToast(friendlyMessage, 'error');
         }
         return false;
       }
