@@ -1,6 +1,7 @@
 /**
  * @file src/components/header/HeaderBrand.tsx
- * @description 헤더 상단 브랜드 로고 및 앱 타이틀/관리자 배지 컴포넌트.
+ * @description 헤더 상단 브랜드 로고 및 앱 타이틀 컴포넌트.
+ * 줄바꿈 방지(white-space: nowrap) 및 화면 크기별 부제 노출을 제어합니다.
  */
 
 import React from 'react';
@@ -8,8 +9,6 @@ import { APP_CONFIG } from '../../config/appConfig';
 import { logger } from '../../utils/logger';
 
 export interface HeaderBrandProps {
-  /** 관리자 여부 */
-  isAdmin?: boolean;
   /** 홈 화면 이동 및 스크롤 콜백 */
   onGoHome: () => void;
 }
@@ -17,10 +16,13 @@ export interface HeaderBrandProps {
 /**
  * 헤더 브랜드 로고 및 타이틀 컴포넌트
  */
-export const HeaderBrand: React.FC<HeaderBrandProps> = ({ isAdmin = false, onGoHome }) => {
-  const handleClick = (e: React.MouseEvent) => {
+export const HeaderBrand: React.FC<HeaderBrandProps> = ({ onGoHome }) => {
+  /**
+   * 브랜드 로고 클릭 핸들러
+   */
+  const handleClick = (e: React.MouseEvent): void => {
     e.preventDefault();
-    logger.info('HeaderBrand', '브랜드 로고 클릭 - 홈 이동');
+    logger.info('HeaderBrand.handleClick', '브랜드 로고 클릭 - 홈 이동');
     onGoHome();
   };
 
@@ -28,25 +30,22 @@ export const HeaderBrand: React.FC<HeaderBrandProps> = ({ isAdmin = false, onGoH
     <a
       href="#home"
       onClick={handleClick}
-      className="group flex items-center gap-2.5 transition"
+      className="group flex shrink-0 items-center gap-2 sm:gap-2.5 transition whitespace-nowrap select-none min-w-fit"
       aria-label={`${APP_CONFIG.appName} 홈으로 이동`}
     >
-      <span className="grid h-10 w-10 place-items-center rounded-2xl bg-gradient-to-tr from-orange-500 to-amber-500 text-xl text-white shadow-sm transition group-hover:-rotate-6 group-hover:scale-105">
+      <span className="grid h-9 w-9 sm:h-10 sm:w-10 place-items-center rounded-2xl bg-gradient-to-tr from-orange-500 to-amber-500 text-lg sm:text-xl text-white shadow-2xs transition group-hover:-rotate-6 group-hover:scale-105 shrink-0">
         🍳
       </span>
-      <div>
-        <div className="font-soft text-[16px] font-black tracking-tight text-stone-900 sm:text-lg flex items-center gap-1.5">
-          <span>{APP_CONFIG.appName}</span>
-          {isAdmin && (
-            <span className="rounded-md bg-orange-500 px-1.5 py-0.5 text-[9px] font-black text-white tracking-normal">
-              관리자
-            </span>
-          )}
+      <div className="flex flex-col justify-center leading-tight">
+        <div className="font-soft text-[15px] sm:text-[17px] font-black tracking-tight text-stone-900 whitespace-nowrap">
+          {APP_CONFIG.appName}
         </div>
-        <div className="hidden text-[9px] font-extrabold tracking-[0.2em] text-orange-600 sm:block">
+        {/* 1400px(2xl) 이상에서만 표시되는 영문 부제 */}
+        <div className="hidden 2xl:block text-[9px] font-extrabold tracking-[0.18em] text-orange-600/90 whitespace-nowrap">
           {APP_CONFIG.appSubTitle}
         </div>
       </div>
     </a>
   );
 };
+

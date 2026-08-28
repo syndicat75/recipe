@@ -88,13 +88,14 @@
 │   │   ├── scaler.ts               # 인분 수 수학적 분량/분수 정밀 계산 엔진
 │   │   └── storage.ts              # LocalStorage 영속화 및 마이그레이션 모듈
 │   └── components/
-│       ├── Header.tsx              # 상단 네비게이션 헤더 (서브컴포넌트 조립 레이아웃)
+│       ├── Header.tsx              # 상단 네비게이션 헤더 (4대 영역 서브컴포넌트 조립 레이아웃)
 │       ├── header/
-│       │   ├── HeaderBrand.tsx     # 브랜드 로고 및 관리자 뱃지
+│       │   ├── HeaderBrand.tsx     # 브랜드 로고 및 앱 타이틀 (줄바꿈 방지 및 해상도별 부제 제어)
 │       │   ├── SyncStatusBadge.tsx # 실시간 클라우드 동기화 상태 뱃지
-│       │   ├── DesktopNavigation.tsx # 데스크톱 네비게이션 메뉴바
-│       │   ├── UserAuthMenu.tsx    # Google 로그인 및 사용자 프로필 드롭다운
-│       │   └── MobileNavMenu.tsx   # 모바일 반응형 네비게이션 드로어
+│       │   ├── DesktopNavigation.tsx # 데스크톱 중앙 핵심 네비게이션 메뉴바 (홈, 오늘뭐먹지, 주간식단, AI, 즐겨찾기, 가족)
+│       │   ├── ToolsMenu.tsx       # 통합 편의 도구 드롭다운 (앱 설치, 타이머, 백업/복원, 시드 복구)
+│       │   ├── UserAuthMenu.tsx    # Google 로그인 및 사용자 프로필 드롭다운 (이메일, 관리자 뱃지, 동기화 상태, 로그아웃)
+│       │   └── MobileNavMenu.tsx   # 모바일 반응형 4대 섹션 네비게이션 드로어
 │       ├── TodayMenuModal.tsx      # 🎲 오늘 뭐 먹지? (룰렛 & AI 추천 모달)
 │       ├── WeeklyMealPlanView.tsx  # 📅 주간 식단표 뷰 (끼니별 계획 & 장보기 추출)
 │       ├── CookingModeModal.tsx    # 🍳 집중 조리 모드 (타이머, 음성 TTS/STT, Wake Lock)

@@ -1,7 +1,7 @@
 /**
  * @file src/components/header/DesktopNavigation.tsx
- * @description 데스크톱 화면의 주요 메뉴 네비게이션 바 컴포넌트.
- * 홈, 오늘 뭐 먹지?, 주간 식단표, AI 요리사, 즐겨찾기, 가족 공간, 관리자 도구 및 PWA 설치 버튼을 렌더링합니다.
+ * @description 데스크톱 화면의 중앙 주요 메뉴 네비게이션 바 컴포넌트.
+ * [홈, 오늘 뭐 먹지?, 주간 식단, AI 요리사, 즐겨찾기, 가족 공간]을 간결한 텍스트 버튼으로 렌더링합니다.
  */
 
 import React from 'react';
@@ -11,34 +11,34 @@ import {
   Sparkles,
   Bookmark,
   Users,
-  Camera,
-  Database,
-  Download,
 } from 'lucide-react';
 import { FilterCategory } from '../../types/recipe';
 import { AppViewMode } from '../../types/navigation';
 import { logger } from '../../utils/logger';
 
 export interface DesktopNavigationProps {
+  /** 현재 선택된 카테고리 필터 */
   currentCategory: FilterCategory;
+  /** 카테고리 선택 핸들러 */
   onSelectCategory: (category: FilterCategory) => void;
+  /** 현재 활성 뷰 */
   currentView: AppViewMode;
+  /** 뷰 전환 핸들러 */
   onNavigateView?: (view: AppViewMode) => void;
+  /** 즐겨찾기 레시피 개수 */
   bookmarkCount: number;
+  /** 오늘 뭐 먹지 모달 열기 */
   onOpenTodayMenu: () => void;
+  /** 가족 공유 모달 열기 */
   onOpenFamilyShare: () => void;
+  /** 현재 가족 공간 이름 */
   currentFamilyName: string | null;
-  isAdmin?: boolean;
-  onOpenImportRecipe: () => void;
-  onOpenBackupRestore: () => void;
-  isStandalone?: boolean;
-  isInstalled?: boolean;
-  onInstallPwa?: () => void;
+  /** 특정 섹션으로 스크롤 */
   scrollToSection: (id: string) => void;
 }
 
 /**
- * 데스크톱 상단 네비게이션 메뉴 컴포넌트
+ * 데스크톱 중앙 핵심 네비게이션 메뉴 컴포넌트
  */
 export const DesktopNavigation: React.FC<DesktopNavigationProps> = ({
   currentCategory,
@@ -49,94 +49,97 @@ export const DesktopNavigation: React.FC<DesktopNavigationProps> = ({
   onOpenTodayMenu,
   onOpenFamilyShare,
   currentFamilyName,
-  isAdmin = false,
-  onOpenImportRecipe,
-  onOpenBackupRestore,
-  isStandalone = false,
-  isInstalled = false,
-  onInstallPwa,
   scrollToSection,
 }) => {
   return (
-    <nav className="hidden items-center gap-1 md:flex" aria-label="상단 메뉴">
-      {/* 홈 버튼 */}
+    <nav className="hidden lg:flex items-center gap-0.5 xl:gap-1 select-none" aria-label="주요 메뉴">
+      {/* 1. 홈 */}
       <button
         type="button"
-        onClick={() => scrollToSection('home')}
-        className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${
+        onClick={() => {
+          logger.info('DesktopNavigation', '홈 메뉴 클릭');
+          if (onNavigateView) onNavigateView('home');
+          scrollToSection('home');
+        }}
+        className={`h-9 px-2.5 xl:px-3 rounded-xl text-xs font-semibold transition-colors flex items-center gap-1 ${
           currentView === 'home' && currentCategory === '전체'
-            ? 'bg-orange-100/80 text-orange-900 font-bold'
-            : 'text-stone-600 hover:bg-orange-100 hover:text-orange-800'
+            ? 'bg-orange-100/90 text-orange-950 font-bold'
+            : 'text-stone-600 hover:bg-orange-50/80 hover:text-orange-900'
         }`}
       >
-        홈
+        <span>홈</span>
       </button>
 
-      {/* 🎲 오늘 뭐 먹지? 버튼 */}
+      {/* 2. 🎲 오늘 뭐 먹지? */}
       <button
         type="button"
         onClick={() => {
           logger.info('DesktopNavigation', '오늘 뭐 먹지 클릭');
           onOpenTodayMenu();
         }}
-        className="flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-bold text-orange-700 bg-orange-50 hover:bg-orange-100 border border-orange-200/70 transition shadow-2xs"
-        title="고민될 때 랜덤 룰렛 또는 AI 추천받기"
+        className="h-9 px-2.5 xl:px-3 rounded-xl text-xs font-semibold text-orange-800 bg-orange-50/60 hover:bg-orange-100/80 hover:text-orange-950 transition-colors flex items-center gap-1.5"
+        title="랜덤 룰렛 및 맞춤 AI 요리 추천"
       >
-        <Dice5 className="h-3.5 w-3.5 text-orange-500" />
+        <Dice5 className="h-3.5 w-3.5 text-orange-500 shrink-0" />
         <span>오늘 뭐 먹지?</span>
       </button>
 
-      {/* 📅 주간 식단표 탭 */}
+      {/* 3. 📅 주간 식단 */}
       <button
         type="button"
         onClick={() => {
+          logger.info('DesktopNavigation', '주간 식단 메뉴 클릭');
           if (onNavigateView) onNavigateView('meal-plan');
         }}
-        className={`flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-semibold transition ${
+        className={`h-9 px-2.5 xl:px-3 rounded-xl text-xs font-semibold transition-colors flex items-center gap-1.5 ${
           currentView === 'meal-plan'
-            ? 'bg-orange-500 text-white font-bold shadow-xs'
-            : 'text-stone-600 hover:bg-orange-100 hover:text-orange-800'
+            ? 'bg-orange-100/90 text-orange-950 font-bold'
+            : 'text-stone-600 hover:bg-orange-50/80 hover:text-orange-900'
         }`}
-        title="월~일 아침/점심/저녁 식단표 계획 및 장보기 생성"
+        title="주간 식단표 계획 및 장보기 추출"
       >
-        <Calendar className="h-3.5 w-3.5" />
-        <span>주간 식단표</span>
+        <Calendar className="h-3.5 w-3.5 text-stone-500 shrink-0" />
+        <span>주간 식단</span>
       </button>
 
-      {/* ✨ AI 요리사 정식 메뉴 버튼 */}
+      {/* 4. ✨ AI 요리사 */}
       <button
         type="button"
         onClick={() => {
+          logger.info('DesktopNavigation', 'AI 요리사 메뉴 클릭');
           if (onNavigateView) onNavigateView('ai-chef');
         }}
-        className={`flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-bold transition shadow-2xs ${
+        className={`h-9 px-2.5 xl:px-3 rounded-xl text-xs font-semibold transition-colors flex items-center gap-1.5 ${
           currentView === 'ai-chef'
-            ? 'bg-gradient-to-r from-orange-500 to-amber-500 text-white shadow-xs'
-            : 'bg-orange-50/90 text-orange-800 hover:bg-orange-100 hover:text-orange-900 border border-orange-200/60'
+            ? 'bg-gradient-to-r from-orange-500 to-amber-500 text-white font-bold shadow-2xs'
+            : 'text-orange-800 bg-orange-50/70 hover:bg-orange-100/80 hover:text-orange-950'
         }`}
-        title="요리 고민이나 팁을 무엇이든 물어보는 AI 요리사"
+        title="스마트 레시피 Q&A 및 요리 비법 AI 상담"
       >
         <Sparkles
-          className={`h-3.5 w-3.5 ${currentView === 'ai-chef' ? 'text-amber-200' : 'text-orange-600'}`}
+          className={`h-3.5 w-3.5 shrink-0 ${
+            currentView === 'ai-chef' ? 'text-amber-200' : 'text-orange-500'
+          }`}
         />
-        <span>✨ AI 요리사</span>
+        <span>AI 요리사</span>
       </button>
 
-      {/* 즐겨찾기 */}
+      {/* 5. 즐겨찾기 */}
       <button
         type="button"
         onClick={() => {
+          logger.info('DesktopNavigation', '즐겨찾기 메뉴 클릭');
           if (onNavigateView) onNavigateView('home');
           onSelectCategory('즐겨찾기');
           scrollToSection('recipes');
         }}
-        className={`flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-semibold transition ${
+        className={`h-9 px-2.5 xl:px-3 rounded-xl text-xs font-semibold transition-colors flex items-center gap-1.5 ${
           currentView === 'home' && currentCategory === '즐겨찾기'
-            ? 'bg-amber-100 font-bold text-amber-800'
-            : 'text-stone-600 hover:bg-orange-100 hover:text-orange-800'
+            ? 'bg-amber-100 text-amber-950 font-bold'
+            : 'text-stone-600 hover:bg-orange-50/80 hover:text-orange-900'
         }`}
       >
-        <Bookmark className="h-3.5 w-3.5 fill-current text-amber-500" />
+        <Bookmark className="h-3.5 w-3.5 text-amber-500 fill-amber-500/30 shrink-0" />
         <span>즐겨찾기</span>
         {bookmarkCount > 0 && (
           <span className="rounded-full bg-amber-500 px-1.5 py-0.2 text-[10px] font-black text-white">
@@ -145,76 +148,26 @@ export const DesktopNavigation: React.FC<DesktopNavigationProps> = ({
         )}
       </button>
 
-      {/* 👨‍👩‍👧 가족 공간 */}
+      {/* 6. 👨‍👩‍👧 가족 공간 */}
       <button
         type="button"
-        onClick={onOpenFamilyShare}
-        className={`flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-bold transition ${
+        onClick={() => {
+          logger.info('DesktopNavigation', '가족 공간 클릭');
+          onOpenFamilyShare();
+        }}
+        className={`h-9 px-2.5 xl:px-3 rounded-xl text-xs font-semibold transition-colors flex items-center gap-1.5 ${
           currentFamilyName
-            ? 'bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100'
-            : 'text-stone-600 hover:bg-orange-100 hover:text-orange-800'
+            ? 'bg-rose-50 text-rose-700 hover:bg-rose-100'
+            : 'text-stone-600 hover:bg-orange-50/80 hover:text-orange-900'
         }`}
-        title="가족 공유 공간"
+        title="실시간 가족 레시피 및 장보기 공유 공간"
       >
-        <Users className="h-3.5 w-3.5 text-rose-500" />
-        <span>{currentFamilyName ? currentFamilyName : '가족 공간'}</span>
+        <Users className="h-3.5 w-3.5 text-rose-500 shrink-0" />
+        <span className="max-w-[80px] xl:max-w-[100px] truncate">
+          {currentFamilyName || '가족 공간'}
+        </span>
       </button>
-
-      {/* 관리자 전용: 외부 레시피 가져오기 */}
-      {isAdmin && (
-        <button
-          type="button"
-          onClick={() => {
-            logger.info('DesktopNavigation', '관리자 외부 레시피 가져오기 클릭');
-            onOpenImportRecipe();
-          }}
-          className="flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-semibold text-orange-700 bg-orange-50/80 hover:bg-orange-100 transition"
-          title="웹페이지 URL, 텍스트 또는 사진에서 AI로 레시피 가져오기 (관리자)"
-        >
-          <Camera className="h-3.5 w-3.5 text-orange-500" />
-          <span>가져오기</span>
-        </button>
-      )}
-
-      {/* 관리자 전용: 데이터 백업 및 복원 */}
-      {isAdmin && (
-        <button
-          type="button"
-          onClick={onOpenBackupRestore}
-          className="flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-semibold text-stone-600 transition hover:bg-orange-100 hover:text-orange-800"
-          title="데이터 백업 및 복원 (관리자)"
-        >
-          <Database className="h-3.5 w-3.5 text-stone-500" />
-          <span>백업/복원</span>
-        </button>
-      )}
-
-      {/* PWA 설치 버튼 */}
-      {!isStandalone && onInstallPwa && (
-        <button
-          type="button"
-          id="desktop-pwa-install-btn"
-          onClick={onInstallPwa}
-          className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold transition shadow-2xs ${
-            isInstalled
-              ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-              : 'bg-orange-50 text-orange-700 border border-orange-200/80 hover:bg-orange-100 hover:text-orange-900'
-          }`}
-          title={isInstalled ? '앱이 이미 설치되어 있습니다' : '홈 화면에 앱 설치하기'}
-        >
-          {isInstalled ? (
-            <>
-              <span className="text-emerald-600 font-black">✓</span>
-              <span>앱 설치됨</span>
-            </>
-          ) : (
-            <>
-              <Download className="h-3.5 w-3.5 text-orange-600" />
-              <span>📲 앱 설치</span>
-            </>
-          )}
-        </button>
-      )}
     </nav>
   );
 };
+

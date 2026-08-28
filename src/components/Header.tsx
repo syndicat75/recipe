@@ -1,15 +1,14 @@
 /**
  * @file src/components/Header.tsx
  * @description 웹앱 상단 네비게이션 헤더 컴포넌트.
- * 브랜드 로고, 네비게이션 메뉴, 클라우드 동기화 상태, 사용자 인증,
- * 타이머 및 장보기/레시피 추가 액션 버튼들을 모듈화된 서브컴포넌트로 조립합니다.
+ * [브랜드] [주요 Navigation] [도구 + 빠른 Action] [사용자 + 레시피 추가 CTA]의 4개 영역으로 구조화하여 렌더링합니다.
  */
 
 import React, { useState } from 'react';
 import {
   ShoppingCart,
   PlusCircle,
-  Timer,
+  Camera,
   Menu,
   X,
   WifiOff,
@@ -19,7 +18,7 @@ import { AppViewMode } from '../types/navigation';
 import { FirebaseAuthUser, SyncStatus } from '../types/firebase';
 import { HeaderBrand } from './header/HeaderBrand';
 import { DesktopNavigation } from './header/DesktopNavigation';
-import { SyncStatusBadge } from './header/SyncStatusBadge';
+import { ToolsMenu } from './header/ToolsMenu';
 import { UserAuthMenu } from './header/UserAuthMenu';
 import { MobileNavMenu } from './header/MobileNavMenu';
 import { logger } from '../utils/logger';
@@ -146,19 +145,16 @@ export const Header: React.FC<HeaderProps> = ({
       {/* 오프라인 상태 알림 바 */}
       {isOffline && (
         <div className="flex items-center justify-center gap-1.5 bg-amber-500 py-1 px-3 text-center text-xs font-bold text-white shadow-xs">
-          <WifiOff className="h-3.5 w-3.5" />
+          <WifiOff className="h-3.5 w-3.5 shrink-0" />
           <span>현재 오프라인 상태입니다. 저장된 레시피와 장보기 목록을 계속 이용하실 수 있습니다.</span>
         </div>
       )}
 
-      <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
-        {/* 브랜드 로고 */}
-        <HeaderBrand
-          isAdmin={isAdmin}
-          onGoHome={() => scrollToSection('home')}
-        />
+      <div className="mx-auto flex h-16 sm:h-[68px] max-w-7xl items-center justify-between px-3 sm:px-5 lg:px-6 xl:px-8 gap-2">
+        {/* 1. 브랜드 영역 */}
+        <HeaderBrand onGoHome={() => scrollToSection('home')} />
 
-        {/* 데스크톱 네비게이션 바 */}
+        {/* 2. 주요 Navigation 영역 (중앙) */}
         <DesktopNavigation
           currentCategory={currentCategory}
           onSelectCategory={onSelectCategory}
@@ -168,54 +164,26 @@ export const Header: React.FC<HeaderProps> = ({
           onOpenTodayMenu={onOpenTodayMenu}
           onOpenFamilyShare={onOpenFamilyShare}
           currentFamilyName={currentFamilyName || null}
-          isAdmin={isAdmin}
-          onOpenImportRecipe={onOpenImportRecipe}
-          onOpenBackupRestore={onOpenBackupRestore}
-          isStandalone={isStandalone}
-          isInstalled={isInstalled}
-          onInstallPwa={onInstallPwa}
           scrollToSection={scrollToSection}
         />
 
-        {/* 우측 액션 툴바 */}
-        <div className="flex items-center gap-1.5 sm:gap-2">
-          {/* 클라우드 동기화 상태 뱃지 (데스크톱) */}
-          {user && (
-            <div className="hidden xl:flex items-center">
-              <SyncStatusBadge syncStatus={syncStatus} />
-            </div>
+        {/* 3. 우측 도구 + 빠른 Action + 사용자 + 레시피 추가 CTA */}
+        <div className="flex items-center gap-1 sm:gap-1.5 xl:gap-2 shrink-0">
+          {/* 관리자 전용: 외부 레시피 가져오기 */}
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={() => {
+                logger.info('Header', '가져오기 버튼 클릭');
+                onOpenImportRecipe();
+              }}
+              className="hidden sm:flex h-9 sm:h-10 items-center gap-1.5 rounded-xl border border-orange-200/70 bg-white/90 px-2.5 sm:px-3 text-xs font-semibold text-stone-700 hover:bg-orange-50/70 hover:text-orange-950 shadow-2xs transition"
+              title="웹페이지 URL, 텍스트 또는 사진에서 AI로 레시피 가져오기 (관리자)"
+            >
+              <Camera className="h-3.5 w-3.5 text-orange-500 shrink-0" />
+              <span>가져오기</span>
+            </button>
           )}
-
-          {/* 사용자 인증 프로필 / 로그인 버튼 */}
-          <UserAuthMenu
-            user={user}
-            isAdmin={isAdmin}
-            syncStatus={syncStatus}
-            isLoggingIn={isLoggingIn}
-            onLogin={onLogin}
-            onLogout={onLogout}
-            onOpenCloudSyncModal={onOpenCloudSyncModal}
-            onRestoreDefaultRecipes={onRestoreDefaultRecipes}
-          />
-
-          {/* 타이머 토글 버튼 */}
-          <button
-            type="button"
-            onClick={() => {
-              logger.info('Header', '타이머 버튼 클릭');
-              onToggleTimer();
-            }}
-            className={`relative flex h-10 items-center gap-1.5 rounded-xl border px-3 text-xs font-bold transition shadow-sm ${
-              isTimerOpen
-                ? 'border-orange-300 bg-orange-500 text-white'
-                : 'border-orange-200 bg-white text-stone-700 hover:bg-orange-50'
-            }`}
-            title="요리 타이머"
-            aria-label="요리 타이머 열기"
-          >
-            <Timer className="h-4 w-4" />
-            <span className="hidden sm:inline">타이머</span>
-          </button>
 
           {/* 장보기 목록 버튼 */}
           <button
@@ -224,20 +192,43 @@ export const Header: React.FC<HeaderProps> = ({
               logger.info('Header', '장보기 목록 열기 클릭');
               onOpenShoppingList();
             }}
-            className="relative flex h-10 items-center gap-1.5 rounded-xl border border-orange-200 bg-white px-3 text-xs font-bold text-stone-700 shadow-sm transition hover:bg-orange-50"
+            className="flex h-9 sm:h-10 items-center gap-1.5 rounded-xl border border-orange-200/70 bg-white/90 px-2.5 sm:px-3 text-xs font-semibold text-stone-700 shadow-2xs transition hover:bg-orange-50/70 hover:text-orange-950"
             title="장보기 목록"
             aria-label="장보기 목록 보기"
           >
-            <ShoppingCart className="h-4 w-4 text-orange-600" />
+            <ShoppingCart className="h-3.5 w-3.5 text-orange-600 shrink-0" />
             <span className="hidden sm:inline">장보기</span>
             {shoppingCount > 0 && (
-              <span className="rounded-full bg-orange-500 px-1.5 py-0.5 text-[10px] font-black text-white">
+              <span className="rounded-full bg-orange-500 px-1.5 py-0.2 text-[10px] font-black text-white">
                 {shoppingCount}
               </span>
             )}
           </button>
 
-          {/* 레시피 추가 메인 버튼 (관리자 전용) */}
+          {/* 🛠 도구 ▾ 통합 드롭다운 */}
+          <ToolsMenu
+            isStandalone={isStandalone}
+            isInstalled={isInstalled}
+            onInstallPwa={onInstallPwa}
+            isTimerOpen={isTimerOpen}
+            onToggleTimer={onToggleTimer}
+            isAdmin={isAdmin}
+            onOpenBackupRestore={onOpenBackupRestore}
+            onRestoreDefaultRecipes={onRestoreDefaultRecipes}
+          />
+
+          {/* 사용자 프로필 / 인증 드롭다운 */}
+          <UserAuthMenu
+            user={user}
+            isAdmin={isAdmin}
+            syncStatus={syncStatus}
+            isLoggingIn={isLoggingIn}
+            onLogin={onLogin}
+            onLogout={onLogout}
+            onOpenCloudSyncModal={onOpenCloudSyncModal}
+          />
+
+          {/* + 레시피 추가 Primary CTA (관리자 전용) */}
           {isAdmin && (
             <button
               type="button"
@@ -245,11 +236,11 @@ export const Header: React.FC<HeaderProps> = ({
                 logger.info('Header', '관리자 레시피 등록 모달 열기 클릭');
                 onOpenAddRecipe();
               }}
-              className="flex h-10 items-center gap-1.5 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 px-3.5 sm:px-4 text-xs font-black text-white shadow-md shadow-orange-500/20 transition hover:from-orange-600 hover:to-amber-600 active:scale-95"
+              className="flex h-[38px] sm:h-[42px] items-center gap-1.5 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 px-3 sm:px-4 text-xs font-black text-white shadow-md shadow-orange-500/20 transition hover:from-orange-600 hover:to-amber-600 active:scale-95 shrink-0"
               title="새 레시피 직접 등록 (관리자)"
             >
-              <PlusCircle className="h-4 w-4" />
-              <span>레시피 추가</span>
+              <PlusCircle className="h-4 w-4 shrink-0" />
+              <span className="whitespace-nowrap">+ 레시피 추가</span>
             </button>
           )}
 
@@ -257,7 +248,7 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             type="button"
             onClick={handleToggleMobileMenu}
-            className="flex h-10 w-10 items-center justify-center rounded-xl border border-orange-200 bg-white text-stone-700 md:hidden"
+            className="flex h-9 w-9 sm:h-10 sm:w-10 items-center justify-center rounded-xl border border-orange-200/80 bg-white/90 text-stone-700 shadow-2xs lg:hidden hover:bg-orange-50"
             aria-label="메뉴 열기/닫기"
           >
             {isMobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
@@ -278,6 +269,10 @@ export const Header: React.FC<HeaderProps> = ({
         onNavigateView={onNavigateView}
         onSelectCategory={onSelectCategory}
         bookmarkCount={bookmarkCount}
+        shoppingCount={shoppingCount}
+        onOpenShoppingList={onOpenShoppingList}
+        isTimerOpen={isTimerOpen}
+        onToggleTimer={onToggleTimer}
         onOpenTodayMenu={onOpenTodayMenu}
         onOpenFamilyShare={onOpenFamilyShare}
         onOpenAddRecipe={onOpenAddRecipe}
@@ -292,3 +287,4 @@ export const Header: React.FC<HeaderProps> = ({
     </header>
   );
 };
+
