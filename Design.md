@@ -55,11 +55,13 @@
 │   └── favicon.svg                 # 앱 파비콘
 ├── src/
 │   ├── types/
-│   │   ├── recipe.ts               # 레시피, 식단표, 타이머, 구 가족 타입 정의
+│   │   ├── recipe.ts               # 레시피, 식단표, 타이머 타입 정의
 │   │   ├── family.ts               # Firestore 실시간 가족 공유 스키마 및 문서 타입 정의
-│   │   └── firebase.ts             # Firebase Auth 및 사용자 타입 정의
+│   │   ├── firebase.ts             # Firebase Auth 및 사용자 동기화 상태 타입 정의
+│   │   └── navigation.ts           # 해시 라우팅 및 뷰 모드 타입 정의
 │   ├── config/
-│   │   └── appConfig.ts            # 카테고리, 모델명, AI 엔드포인트, 스토리지 키
+│   │   ├── appConfig.ts            # 카테고리, 모델명, AI 엔드포인트, 스토리지 키
+│   │   └── firebaseConfig.ts       # Firebase SDK 초기화 및 싱글톤 인스턴스
 │   ├── data/
 │   │   └── initialRecipes.ts       # 기본 26개 시드 레시피 데이터셋
 │   ├── services/
@@ -67,14 +69,32 @@
 │   │   └── firestoreSync.ts        # 개인 사용자 설정 클라우드 동기화 서비스
 │   ├── hooks/
 │   │   ├── useFirebaseAuth.ts      # Firebase Google Authentication 훅
-│   │   └── useFamilySync.ts        # Cloud Firestore 실시간 가족 공간 동기화 훅
+│   │   ├── useFamilySync.ts        # Cloud Firestore 실시간 가족 공간 동기화 훅
+│   │   ├── usePublicRecipes.ts     # /recipes 단일 진실 공급원 실시간 구독 및 관리자 CRUD 훅
+│   │   ├── useRecipePreferences.ts # 즐겨찾기, 사용자 메모, 최근 본 레시피 상태 훅
+│   │   ├── useShoppingList.ts      # 장보기 목록 CRUD 및 클라우드 동기화 훅
+│   │   ├── useMealPlan.ts          # 개인 주간 식단표 관리 및 레시피 추가 훅
+│   │   ├── useRecipeFilter.ts      # 실시간 검색어, 카테고리 필터링, 정렬 로직 훅
+│   │   ├── useRecipeMigration.ts   # 클라우드 마이그레이션 모달 및 시드 복구 훅
+│   │   ├── useAppNavigation.ts     # URL Hash 기반 뷰 라우팅 동기화 훅
+│   │   ├── useNetworkStatus.ts     # 온라인/오프라인 상태 감지 훅
+│   │   ├── usePwaInstall.ts        # PWA 설치 프롬프트 및 안내 모달 훅
+│   │   └── useToast.ts             # 중복 방지 전역 토스트 알림 훅
 │   ├── utils/
+│   │   ├── admin.ts                # 관리자 UID/이메일 판별 유틸
 │   │   ├── aiApiHelper.ts          # 안전한 AI API 호출 및 JSON 파싱 헬퍼
 │   │   ├── logger.ts               # 구조화된 디버그/인포 로거
+│   │   ├── pwaHelper.ts            # PWA 브라우저 환경 및 standalone 감지 헬퍼
 │   │   ├── scaler.ts               # 인분 수 수학적 분량/분수 정밀 계산 엔진
 │   │   └── storage.ts              # LocalStorage 영속화 및 마이그레이션 모듈
 │   └── components/
-│       ├── Header.tsx              # 상단 네비게이션, 오늘뭐먹지, 주간식단, 가족공간 바
+│       ├── Header.tsx              # 상단 네비게이션 헤더 (서브컴포넌트 조립 레이아웃)
+│       ├── header/
+│       │   ├── HeaderBrand.tsx     # 브랜드 로고 및 관리자 뱃지
+│       │   ├── SyncStatusBadge.tsx # 실시간 클라우드 동기화 상태 뱃지
+│       │   ├── DesktopNavigation.tsx # 데스크톱 네비게이션 메뉴바
+│       │   ├── UserAuthMenu.tsx    # Google 로그인 및 사용자 프로필 드롭다운
+│       │   └── MobileNavMenu.tsx   # 모바일 반응형 네비게이션 드로어
 │       ├── TodayMenuModal.tsx      # 🎲 오늘 뭐 먹지? (룰렛 & AI 추천 모달)
 │       ├── WeeklyMealPlanView.tsx  # 📅 주간 식단표 뷰 (끼니별 계획 & 장보기 추출)
 │       ├── CookingModeModal.tsx    # 🍳 집중 조리 모드 (타이머, 음성 TTS/STT, Wake Lock)
@@ -95,7 +115,10 @@
 │       ├── TimerWidget.tsx         # 주방 타이머 플로팅 위젯
 │       ├── AboutSection.tsx        # 스마트 기능 소개
 │       ├── Footer.tsx              # 푸터 정보
-│       └── Toast.tsx               # 글로벌 피드백 토스트
+│       ├── Toast.tsx               # 글로벌 피드백 토스트
+│       ├── CloudMigrationModal.tsx # 클라우드 데이터 마이그레이션 모달
+│       ├── PwaInstallModal.tsx     # PWA 직접 설치 및 브라우저별 가이드 모달
+│       └── ErrorBoundary.tsx       # 리액트 렌더링 예외 경계 컴포넌트
 ```
 
 ---
