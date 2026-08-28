@@ -49,6 +49,8 @@ export interface MobileNavMenuProps {
   onOpenImportRecipe: () => void;
   onOpenBackupRestore: () => void;
   onRestoreDefaultRecipes?: () => void;
+  /** 칼로리 일괄 분석 모달 열기 핸들러 (관리자 전용) */
+  onOpenAdminCalories?: () => void;
   isStandalone?: boolean;
   isInstalled?: boolean;
   onInstallPwa?: () => void;
@@ -80,6 +82,7 @@ export const MobileNavMenu: React.FC<MobileNavMenuProps> = ({
   onOpenImportRecipe,
   onOpenBackupRestore,
   onRestoreDefaultRecipes,
+  onOpenAdminCalories,
   isStandalone = false,
   isInstalled = false,
   onInstallPwa,
@@ -423,6 +426,26 @@ export const MobileNavMenu: React.FC<MobileNavMenuProps> = ({
             <Camera className="h-4 w-4 text-orange-500" />
             <span>레시피 가져오기 / 사진 인식</span>
           </button>
+
+          {onOpenAdminCalories && (
+            <button
+              type="button"
+              onClick={() => {
+                logger.info('MobileNavMenu', '칼로리 관리 도구 클릭');
+                onOpenAdminCalories();
+                onClose();
+              }}
+              className="w-full flex items-center justify-between rounded-xl p-2.5 text-xs font-bold text-stone-700 bg-stone-50 hover:bg-orange-50 transition text-left"
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-sm">🔥</span>
+                <span>칼로리(kcal) 관리 도구</span>
+              </div>
+              <span className="text-[10px] bg-amber-100 text-amber-800 font-bold px-1.5 py-0.5 rounded">
+                AI
+              </span>
+            </button>
+          )}
 
           <button
             type="button"

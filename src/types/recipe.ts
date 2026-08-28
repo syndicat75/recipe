@@ -53,6 +53,18 @@ export interface Recipe {
   userNotes?: string;
   /** 요리 꿀팁/팁 (선택) */
   tip?: string;
+  /** 1인분 기준 예상 칼로리 (kcal) - 선택 */
+  caloriesPerServing?: number;
+  /** 전체 레시피 기준 총 예상 칼로리 (kcal) - 선택 */
+  totalCalories?: number;
+  /** 칼로리 분석 기준 인분 수 (선택) */
+  caloriesAnalyzedServings?: number;
+  /** 칼로리 분석 시각 타임스탬프 (선택) */
+  caloriesAnalyzedAt?: number;
+  /** 칼로리 분석 신뢰도 ('high' | 'medium' | 'low') - 선택 */
+  caloriesConfidence?: 'high' | 'medium' | 'low';
+  /** 칼로리 세부 내역/주요 기여 재료 설명 (선택) */
+  calorieBreakdown?: string;
   /** 동기화 스코프 ('public': Firestore 공개 레시피, 'private': Firestore 개인 계정 전용 레시피, 'local': 비로그인 기기 전용) */
   syncScope?: 'public' | 'private' | 'local';
   /** 생성 일시 타임스탬프 */
@@ -227,7 +239,32 @@ export type SortOption =
   | 'updated'
   | 'favorite'
   | 'ingredientsAsc'
-  | 'ingredientsDesc';
+  | 'ingredientsDesc'
+  | 'caloriesAsc'
+  | 'caloriesDesc';
+
+/**
+ * AI 칼로리 분석 요청 파라미터 인터페이스
+ */
+export interface AnalyzeCaloriesRequest {
+  recipeId: number;
+  name: string;
+  category?: string;
+  ingredients: string;
+  baseServings?: number;
+}
+
+/**
+ * AI 칼로리 분석 결과 인터페이스
+ */
+export interface CalorieAnalysisResult {
+  recipeId: number;
+  caloriesPerServing: number;
+  totalCalories: number;
+  caloriesAnalyzedServings: number;
+  caloriesConfidence: 'high' | 'medium' | 'low';
+  calorieBreakdown?: string;
+}
 
 /**
  * 백업 및 복원용 데이터 포맷 인터페이스

@@ -80,6 +80,8 @@ export interface HeaderProps {
   onOpenCloudSyncModal?: () => void;
   /** 기본 시드 레시피 복구 핸들러 */
   onRestoreDefaultRecipes?: () => void;
+  /** 칼로리 일괄 분석 모달 열기 핸들러 (관리자 전용) */
+  onOpenAdminCalories?: () => void;
 }
 
 /**
@@ -114,6 +116,7 @@ export const Header: React.FC<HeaderProps> = ({
   onLogout,
   onOpenCloudSyncModal,
   onRestoreDefaultRecipes,
+  onOpenAdminCalories,
 }) => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
@@ -215,6 +218,7 @@ export const Header: React.FC<HeaderProps> = ({
             isAdmin={isAdmin}
             onOpenBackupRestore={onOpenBackupRestore}
             onRestoreDefaultRecipes={onRestoreDefaultRecipes}
+            onOpenAdminCalories={onOpenAdminCalories}
           />
 
           {/* 사용자 프로필 / 인증 드롭다운 */}
@@ -279,6 +283,7 @@ export const Header: React.FC<HeaderProps> = ({
         onOpenImportRecipe={onOpenImportRecipe}
         onOpenBackupRestore={onOpenBackupRestore}
         onRestoreDefaultRecipes={onRestoreDefaultRecipes}
+        onOpenAdminCalories={onOpenAdminCalories}
         isStandalone={isStandalone}
         isInstalled={isInstalled}
         onInstallPwa={onInstallPwa}

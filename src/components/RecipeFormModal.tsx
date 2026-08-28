@@ -69,6 +69,7 @@ export const RecipeFormModal: React.FC<RecipeFormModalProps> = ({
   const [method, setMethod] = useState('');
   const [cookingTime, setCookingTime] = useState<number>(15);
   const [difficulty, setDifficulty] = useState<'쉬움' | '보통' | '어려움'>('쉬움');
+  const [caloriesPerServing, setCaloriesPerServing] = useState<string>('');
   const [isBookmarked, setIsBookmarked] = useState<boolean>(false);
   const [userNote, setUserNote] = useState<string>('');
   const [imageTab, setImageTab] = useState<'emoji' | 'url' | 'upload'>('emoji');
@@ -92,6 +93,11 @@ export const RecipeFormModal: React.FC<RecipeFormModalProps> = ({
         setMethod(recipeToEdit.method === '-' ? '' : recipeToEdit.method || '');
         setCookingTime(recipeToEdit.cookingTimeMinutes || 15);
         setDifficulty(recipeToEdit.difficulty || '쉬움');
+        setCaloriesPerServing(
+          recipeToEdit.caloriesPerServing && recipeToEdit.caloriesPerServing > 0
+            ? String(recipeToEdit.caloriesPerServing)
+            : ''
+        );
         setIsBookmarked(!!recipeToEdit.isBookmarked || initialBookmarked);
         setUserNote(initialUserNote || recipeToEdit.userNotes || '');
         setImageTab(recipeToEdit.imageUrl ? 'url' : 'emoji');
@@ -214,6 +220,9 @@ export const RecipeFormModal: React.FC<RecipeFormModalProps> = ({
     const createdAt = isEditMode && recipeToEdit ? recipeToEdit.createdAt || Date.now() : Date.now();
     const targetScope: 'public' = 'public';
 
+    const parsedCalories = caloriesPerServing.trim() ? Number(caloriesPerServing) : undefined;
+    const validCalories = parsedCalories && !isNaN(parsedCalories) && parsedCalories > 0 ? Math.round(parsedCalories) : undefined;
+
     const recipeData: Recipe = {
       id: targetId,
       name: name.trim(),
@@ -226,6 +235,12 @@ export const RecipeFormModal: React.FC<RecipeFormModalProps> = ({
       stepCount: stepLines.length,
       cookingTimeMinutes: Number(cookingTime) || 15,
       difficulty,
+      ...(validCalories ? { caloriesPerServing: validCalories } : (isEditMode && recipeToEdit?.caloriesPerServing ? { caloriesPerServing: recipeToEdit.caloriesPerServing } : {})),
+      ...(isEditMode && recipeToEdit?.totalCalories ? { totalCalories: recipeToEdit.totalCalories } : {}),
+      ...(isEditMode && recipeToEdit?.caloriesAnalyzedServings ? { caloriesAnalyzedServings: recipeToEdit.caloriesAnalyzedServings } : {}),
+      ...(isEditMode && recipeToEdit?.caloriesAnalyzedAt ? { caloriesAnalyzedAt: recipeToEdit.caloriesAnalyzedAt } : {}),
+      ...(isEditMode && recipeToEdit?.caloriesConfidence ? { caloriesConfidence: recipeToEdit.caloriesConfidence } : {}),
+      ...(isEditMode && recipeToEdit?.calorieBreakdown ? { calorieBreakdown: recipeToEdit.calorieBreakdown } : {}),
       isCustom: isEditMode ? recipeToEdit?.isCustom ?? true : true,
       isBookmarked,
       ...(userNote.trim() ? { userNotes: userNote.trim() } : {}),
@@ -487,7 +502,7 @@ export const RecipeFormModal: React.FC<RecipeFormModalProps> = ({
           </div>
 
           {/* Cooking Time, Difficulty & Bookmark Option */}
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <div>
               <label className="block text-xs font-bold text-stone-700">소요 시간 (분)</label>
               <input
@@ -513,7 +528,20 @@ export const RecipeFormModal: React.FC<RecipeFormModalProps> = ({
               </select>
             </div>
 
-            <div className="col-span-2 sm:col-span-1 flex flex-col justify-end">
+            <div>
+              <label className="block text-xs font-bold text-stone-700">1인분 칼로리 (kcal)</label>
+              <input
+                type="number"
+                min={1}
+                max={5000}
+                placeholder="예: 420 (선택)"
+                value={caloriesPerServing}
+                onChange={(e) => setCaloriesPerServing(e.target.value)}
+                className="mt-1.5 w-full rounded-xl border border-orange-200 bg-[#fffdfa] px-3.5 py-2 text-sm text-stone-800 outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100"
+              />
+            </div>
+
+            <div className="flex flex-col justify-end">
               <label className="flex items-center gap-2 cursor-pointer rounded-xl border border-orange-200 bg-[#fffdfa] p-2.5 transition hover:bg-orange-50">
                 <input
                   type="checkbox"
@@ -523,7 +551,7 @@ export const RecipeFormModal: React.FC<RecipeFormModalProps> = ({
                 />
                 <span className="flex items-center gap-1 text-xs font-bold text-stone-700">
                   <Bookmark className={`h-3.5 w-3.5 ${isBookmarked ? 'fill-amber-500 text-amber-500' : 'text-stone-400'}`} />
-                  <span>즐겨찾기에 추가</span>
+                  <span className="truncate">즐겨찾기</span>
                 </span>
               </label>
             </div>

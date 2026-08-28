@@ -53,6 +53,7 @@ import { WeeklyMealPlanView } from './components/WeeklyMealPlanView';
 import { FamilyShareModal } from './components/FamilyShareModal';
 import { CloudMigrationModal } from './components/CloudMigrationModal';
 import { PwaInstallModal } from './components/PwaInstallModal';
+import { AdminCalorieModal } from './components/AdminCalorieModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
 
 /**
@@ -207,6 +208,7 @@ export default function App(): React.JSX.Element {
   const [isTimerOpen, setIsTimerOpen] = useState<boolean>(false);
   const [isTodayMenuModalOpen, setIsTodayMenuModalOpen] = useState<boolean>(false);
   const [isFamilyShareModalOpen, setIsFamilyShareModalOpen] = useState<boolean>(false);
+  const [isAdminCalorieModalOpen, setIsAdminCalorieModalOpen] = useState<boolean>(false);
   const [aiChefRecipe, setAiChefRecipe] = useState<Recipe | null>(null);
 
   // 13. Confirm Dialog State
@@ -548,6 +550,7 @@ export default function App(): React.JSX.Element {
         onLogout={handleLogout}
         onOpenCloudSyncModal={handleManualOpenCloudSyncModal}
         onRestoreDefaultRecipes={handleRestoreDefaultRecipes}
+        onOpenAdminCalories={() => setIsAdminCalorieModalOpen(true)}
       />
 
       {/* Main Content Areas based on Routing */}
@@ -804,6 +807,17 @@ export default function App(): React.JSX.Element {
         onRestoreComplete={handleRestoreComplete}
         showToast={showToast}
       />
+
+      {/* Calorie Batch Analysis & Management Modal - 관리자 전용 */}
+      {isAdmin && (
+        <AdminCalorieModal
+          isOpen={isAdminCalorieModalOpen}
+          recipes={recipes}
+          onClose={() => setIsAdminCalorieModalOpen(false)}
+          onSaveRecipe={handleSaveRecipe}
+          showToast={showToast}
+        />
+      )}
 
       {/* AI Recipe Import Modal - 관리자 전용 */}
       <ImportRecipeModal

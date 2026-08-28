@@ -598,3 +598,137 @@ ${candidateRecipes.map((r) => `- [ID: ${r.id}] ${r.name} (${r.category}) / 주�
     };
   }
 }
+
+/**
+ * 5. 레시피 재료 기반 예상 칼로리(kcal) 분석
+ * @param params recipeId, name, category, ingredients, baseServings
+ * @returns 1인분 기준 및 총 예상 칼로리, 신뢰도
+ */
+export async function analyzeRecipeCalories(params: {
+  recipeId: number;
+  name: string;
+  category?: string;
+  ingredients: string;
+  baseServings?: number;
+}): Promise<{
+  success: boolean;
+  data?: {
+    recipeId: number;
+    caloriesPerServing: number;
+    totalCalories: number;
+    caloriesAnalyzedServings: number;
+    caloriesConfidence: 'high' | 'medium' | 'low';
+    calorieBreakdown?: string;
+  };
+  error?: string;
+  details?: string;
+}> {
+  try {
+    const { recipeId, name, category = '기타', ingredients, baseServings = 2 } = params;
+
+    if (!name || !ingredients || !ingredients.trim()) {
+      return {
+        success: false,
+        error: '요리 이름과 재료 정보가 필요합니다.',
+      };
+    }
+
+    const ai = getGeminiClient();
+    const servings = Math.max(1, Number(baseServings) || 2);
+
+    const prompt = `당신은 한식 및 일반 가정식의 영양과 열량을 과학적이고 현실적으로 분석하는 전문 영양사입니다.
+제공된 레시피 이름과 재료 목록, 기준 인분 수를 분석하여 현실적인 예상 칼로리(kcal)를 산출해주세요.
+
+[요리 정보]
+- 요리명: ${name}
+- 카테고리: ${category}
+- 기준 인분: ${servings}인분
+- 재료 목록:
+${ingredients.trim()}
+
+[산출 및 계산 원칙 - 엄격 준수]
+1. 제시된 모든 식재료(주재료, 부재료, 양념류, 기름/식용유 등)의 분량을 표준 영양 성분표를 바탕으로 합산하여 전체 레시피의 총 예상 칼로리(totalCalories)를 정수(kcal)로 계산하세요.
+2. 1인분 기준 예상 칼로리(caloriesPerServing) = Math.round(totalCalories / ${servings}) 로 계산하세요.
+3. 칼로리는 일반적인 한식/가정식 한 끼 또는 반찬 기준(반찬: 50~250kcal, 찌개/국: 150~450kcal, 밥/한그릇: 450~850kcal, 양식/중식: 500~950kcal 등)에 부합하는 현실적인 값이어야 합니다.
+4. 재료 분량(g, 큰술, 모, 개 등)이 명확하면 confidence를 'high', 대략적인 수량만 있으면 'medium', 분량이 거의 적혀있지 않고 이름만 있으면 'low'로 지정하세요.
+5. calorieBreakdown에는 주요 열량 기여 재료 2~3가지를 간략히 요약하세요 (예: "돼지고기 약 250kcal, 두부 약 90kcal").`;
+
+    const response = await generateWithFallback(ai, {
+      contents: prompt,
+      config: {
+        systemInstruction: 'You are an expert culinary nutritionist analyzing recipe calories in Korean.',
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            caloriesPerServing: {
+              type: Type.INTEGER,
+              description: '1인분 기준 예상 칼로리 (kcal 정수)',
+            },
+            totalCalories: {
+              type: Type.INTEGER,
+              description: '레시피 전체 총 예상 칼로리 (kcal 정수)',
+            },
+            caloriesConfidence: {
+              type: Type.STRING,
+              enum: ['high', 'medium', 'low'],
+              description: '분석 신뢰도',
+            },
+            calorieBreakdown: {
+              type: Type.STRING,
+              description: '주요 열량 원천 재료 요약',
+            },
+          },
+          required: ['caloriesPerServing', 'totalCalories', 'caloriesConfidence'],
+        },
+      },
+    });
+
+    interface RawCalorieResponse {
+      caloriesPerServing?: number;
+      totalCalories?: number;
+      caloriesConfidence?: 'high' | 'medium' | 'low';
+      calorieBreakdown?: string;
+    }
+
+    const parsed = safeParseGeminiJson<RawCalorieResponse>(response.text);
+
+    let calPerServing = Number(parsed.caloriesPerServing);
+    let totalCal = Number(parsed.totalCalories);
+
+    if (!calPerServing || isNaN(calPerServing) || calPerServing <= 0) {
+      if (totalCal && totalCal > 0) {
+        calPerServing = Math.round(totalCal / servings);
+      } else {
+        calPerServing = 350; // fallback reasonable average
+      }
+    }
+
+    if (!totalCal || isNaN(totalCal) || totalCal <= 0) {
+      totalCal = calPerServing * servings;
+    }
+
+    return {
+      success: true,
+      data: {
+        recipeId,
+        caloriesPerServing: Math.round(calPerServing),
+        totalCalories: Math.round(totalCal),
+        caloriesAnalyzedServings: servings,
+        caloriesConfidence: parsed.caloriesConfidence || 'medium',
+        calorieBreakdown: parsed.calorieBreakdown || undefined,
+      },
+    };
+  } catch (error) {
+    console.error('Error analyzing recipe calories:', error);
+    const errObj = formatAiServiceError(
+      error,
+      '레시피 칼로리 분석 중 오류가 발생했습니다.'
+    );
+    return {
+      success: false,
+      ...errObj,
+    };
+  }
+}
+

@@ -5,7 +5,7 @@
  */
 
 import React, { useState, useRef } from 'react';
-import { Wrench, ChevronDown, Download, Timer, Database, RotateCcw } from 'lucide-react';
+import { Wrench, ChevronDown, Download, Timer, Database, RotateCcw, Flame } from 'lucide-react';
 import { useClickOutside } from '../../hooks/useClickOutside';
 import { logger } from '../../utils/logger';
 
@@ -26,6 +26,8 @@ export interface ToolsMenuProps {
   onOpenBackupRestore?: () => void;
   /** 기본 시드 레시피 복구 핸들러 (관리자 전용) */
   onRestoreDefaultRecipes?: () => void;
+  /** 칼로리 일괄 분석 도구 모달 열기 핸들러 (관리자 전용) */
+  onOpenAdminCalories?: () => void;
 }
 
 /**
@@ -40,6 +42,7 @@ export const ToolsMenu: React.FC<ToolsMenuProps> = ({
   isAdmin = false,
   onOpenBackupRestore,
   onRestoreDefaultRecipes,
+  onOpenAdminCalories,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -153,8 +156,29 @@ export const ToolsMenu: React.FC<ToolsMenuProps> = ({
             </button>
 
             {/* 관리자 전용 기능 구분선 */}
-            {isAdmin && (onOpenBackupRestore || onRestoreDefaultRecipes) && (
+            {isAdmin && (onOpenBackupRestore || onRestoreDefaultRecipes || onOpenAdminCalories) && (
               <div className="my-1 border-t border-stone-100 pt-1" />
+            )}
+
+            {/* 🔥 칼로리 일괄 분석 (관리자 전용) */}
+            {isAdmin && onOpenAdminCalories && (
+              <button
+                type="button"
+                onClick={() => {
+                  logger.info('ToolsMenu', '칼로리 일괄 분석 항목 클릭');
+                  setIsOpen(false);
+                  onOpenAdminCalories();
+                }}
+                className="w-full flex items-center justify-between rounded-xl px-2.5 py-2 text-xs font-semibold text-stone-700 hover:bg-orange-50 hover:text-orange-900 transition text-left"
+              >
+                <div className="flex items-center gap-2">
+                  <Flame className="h-4 w-4 text-orange-500" />
+                  <span>칼로리(kcal) 관리 도구</span>
+                </div>
+                <span className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded-md">
+                  AI
+                </span>
+              </button>
             )}
 
             {/* 💾 백업 / 복원 (관리자 전용) */}

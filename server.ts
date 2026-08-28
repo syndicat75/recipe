@@ -14,6 +14,7 @@ import {
   importRecipeFromImage,
   askChefAboutRecipe,
   recommendMenuFromCandidates,
+  analyzeRecipeCalories,
   getGeminiClient,
 } from './lib/geminiService';
 
@@ -190,6 +191,41 @@ async function startServer(): Promise<void> {
       res.status(500).json({
         success: false,
         error: 'AI 메뉴 추천 중 오류가 발생했습니다.',
+        details: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  /**
+   * 레시피 칼로리(kcal) 분석 엔드포인트
+   */
+  app.post('/api/ai/analyze-calories', async (req: Request, res: Response): Promise<void> => {
+    res.setHeader('Content-Type', 'application/json');
+    try {
+      const { recipeId, name, category, ingredients, baseServings } = req.body;
+      if (!name || !ingredients || !ingredients.trim()) {
+        res.status(400).json({ success: false, error: '요리 이름과 재료 정보가 필요합니다.' });
+        return;
+      }
+
+      const result = await analyzeRecipeCalories({
+        recipeId: Number(recipeId) || 0,
+        name,
+        category,
+        ingredients,
+        baseServings: Number(baseServings) || 2,
+      });
+
+      if (!result.success) {
+        res.status(500).json(result);
+        return;
+      }
+      res.status(200).json(result);
+    } catch (error) {
+      console.error('Error in /api/ai/analyze-calories:', error);
+      res.status(500).json({
+        success: false,
+        error: '레시피 칼로리 분석 중 오류가 발생했습니다.',
         details: error instanceof Error ? error.message : String(error),
       });
     }

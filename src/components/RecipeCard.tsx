@@ -162,8 +162,20 @@ export const RecipeCard: React.FC<RecipeCardProps> = ({
               {recipe.name}
             </h3>
 
-            {/* Meta Info (Time & Difficulty) */}
+            {/* Meta Info (Time & Difficulty & Calories) */}
             <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-stone-500">
+              {recipe.caloriesPerServing && recipe.caloriesPerServing > 0 ? (
+                <span className="inline-flex items-center gap-1 rounded-lg bg-amber-50 border border-amber-200/80 px-2 py-0.5 text-xs font-extrabold text-amber-900 shadow-2xs">
+                  <span className="text-orange-500">🔥</span>
+                  <span>{recipe.caloriesPerServing} kcal</span>
+                  <span className="text-[10px] font-medium text-amber-700">/ 1인분</span>
+                </span>
+              ) : isAdmin ? (
+                <span className="inline-flex items-center gap-0.5 rounded-lg bg-stone-100 px-1.5 py-0.5 text-[10px] font-medium text-stone-400" title="칼로리 미분석 레시피">
+                  🔥 미분석
+                </span>
+              ) : null}
+
               {recipe.cookingTimeMinutes && (
                 <span className="flex items-center gap-1">
                   <Clock className="h-3.5 w-3.5 text-stone-400" />

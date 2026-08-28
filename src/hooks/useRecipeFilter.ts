@@ -96,6 +96,16 @@ export function useRecipeFilter({
       }
       if (sortOption === 'ingredientsAsc') return a.ingredientCount - b.ingredientCount;
       if (sortOption === 'ingredientsDesc') return b.ingredientCount - a.ingredientCount;
+      if (sortOption === 'caloriesAsc') {
+        const calA = a.caloriesPerServing && a.caloriesPerServing > 0 ? a.caloriesPerServing : 999999;
+        const calB = b.caloriesPerServing && b.caloriesPerServing > 0 ? b.caloriesPerServing : 999999;
+        return calA - calB;
+      }
+      if (sortOption === 'caloriesDesc') {
+        const calA = a.caloriesPerServing && a.caloriesPerServing > 0 ? a.caloriesPerServing : -1;
+        const calB = b.caloriesPerServing && b.caloriesPerServing > 0 ? b.caloriesPerServing : -1;
+        return calB - calA;
+      }
       return 0;
     });
   }, [recipes, activeCategory, searchQuery, bookmarkedIds, sortOption, userNotes]);

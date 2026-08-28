@@ -40,6 +40,7 @@ export const APP_CONFIG = {
     importImageEndpoint: '/api/ai/import-recipe-image',
     askEndpoint: '/api/ai/ask-recipe',
     recommendEndpoint: '/api/ai/recommend-menu',
+    analyzeCaloriesEndpoint: '/api/ai/analyze-calories',
     quickQuestions: [
       { id: 'substitute', label: '🥬 대체 재료', prompt: '대체할 수 있는 다른 재료나 양념이 있나요?' },
       { id: 'tastier', label: '👨‍🍳 더 맛있게', prompt: '더 맛있고 감칠맛 나게 만드는 셰프의 특급 비법 꿀팁을 알려주세요.' },

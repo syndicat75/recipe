@@ -107,6 +107,8 @@ export const RecipeList: React.FC<RecipeListProps> = ({
             <option value="favorite">즐겨찾기 우선순</option>
             <option value="ingredientsAsc">재료 적은 순</option>
             <option value="ingredientsDesc">재료 많은 순</option>
+            <option value="caloriesAsc">🔥 칼로리 낮은 순 (1인분)</option>
+            <option value="caloriesDesc">🔥 칼로리 높은 순 (1인분)</option>
           </select>
         </div>
       </div>
