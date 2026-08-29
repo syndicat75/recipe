@@ -84,6 +84,11 @@ export const AdminCalorieModal: React.FC<AdminCalorieModalProps> = ({
       logger.info('AdminCalorieModal.analyzeSingleRecipe', `칼로리 분석 시작: ${recipe.name} (ID: ${recipe.id})`);
       setAnalyzingRecipeId(recipe.id);
 
+      const recipeServings =
+        typeof recipe.baseServings === 'number' && recipe.baseServings >= 1
+          ? recipe.baseServings
+          : 1;
+
       const response = await fetch(APP_CONFIG.ai.analyzeCaloriesEndpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -92,7 +97,7 @@ export const AdminCalorieModal: React.FC<AdminCalorieModalProps> = ({
           name: recipe.name,
           category: recipe.category,
           ingredients: recipe.ingredients,
-          baseServings: recipe.baseServings || 2,
+          baseServings: recipeServings,
         }),
       });
 
@@ -113,7 +118,7 @@ export const AdminCalorieModal: React.FC<AdminCalorieModalProps> = ({
         ...recipe,
         caloriesPerServing: Math.round(caloriesPerServing),
         totalCalories: Math.round(totalCalories),
-        caloriesAnalyzedServings: caloriesAnalyzedServings || recipe.baseServings || 2,
+        caloriesAnalyzedServings: caloriesAnalyzedServings || recipeServings,
         caloriesAnalyzedAt: Date.now(),
         caloriesConfidence: caloriesConfidence || 'medium',
         calorieBreakdown: calorieBreakdown || undefined,
@@ -206,11 +211,16 @@ export const AdminCalorieModal: React.FC<AdminCalorieModalProps> = ({
       return;
     }
 
+    const recipeServings =
+      typeof recipe.baseServings === 'number' && recipe.baseServings >= 1
+        ? recipe.baseServings
+        : 1;
+
     const updatedRecipe: Recipe = removeUndefinedDeep({
       ...recipe,
       caloriesPerServing: Math.round(val),
-      totalCalories: Math.round(val * (recipe.baseServings || 2)),
-      caloriesAnalyzedServings: recipe.baseServings || 2,
+      totalCalories: Math.round(val * recipeServings),
+      caloriesAnalyzedServings: recipeServings,
       caloriesAnalyzedAt: Date.now(),
       caloriesConfidence: 'high',
       updatedAt: Date.now(),
@@ -394,7 +404,9 @@ export const AdminCalorieModal: React.FC<AdminCalorieModalProps> = ({
                       <div className="flex items-center gap-2">
                         <span className="font-soft text-sm font-black text-stone-900">{r.name}</span>
                         <span className="text-[11px] text-stone-400">({r.category})</span>
-                        <span className="text-[11px] text-stone-400">기준: {r.baseServings || 2}인분</span>
+                        <span className="text-[11px] text-stone-400">
+                          기준: {typeof r.baseServings === 'number' && r.baseServings >= 1 ? r.baseServings : 1}인분
+                        </span>
                       </div>
 
                       {/* Calorie Info */}
@@ -405,7 +417,13 @@ export const AdminCalorieModal: React.FC<AdminCalorieModalProps> = ({
                               🔥 {r.caloriesPerServing} kcal / 1인분
                             </span>
                             <span className="text-stone-500 text-[11px]">
-                              (총 약 {r.totalCalories || Math.round((r.caloriesPerServing || 0) * (r.baseServings || 2))} kcal)
+                              (총 약{' '}
+                              {r.totalCalories ||
+                                Math.round(
+                                  (r.caloriesPerServing || 0) *
+                                    (typeof r.baseServings === 'number' && r.baseServings >= 1 ? r.baseServings : 1)
+                                )}{' '}
+                              kcal)
                             </span>
                             {r.calorieBreakdown && (
                               <span className="text-[11px] text-stone-500 truncate max-w-xs">

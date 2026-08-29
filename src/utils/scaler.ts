@@ -169,12 +169,13 @@ export function getScaledIngredientsList(ingredientsText: string, multiplier: nu
 
 /**
  * 기준 인분 및 목표 인분을 받아 배율을 계산합니다.
- * @param baseServings 기준 인분 (기본 2)
- * @param targetServings 목표 인분
- * @returns 배율 (예: 2인분 기준 4인분 선택 시 2.0)
+ * @param baseServings 기준 인분 (기본 1)
+ * @param targetServings 목표 인분 (기본 1)
+ * @returns 배율 (예: 1인분 기준 2인분 선택 시 2.0)
  */
-export function calculateServingsMultiplier(baseServings: number = 2, targetServings: number = 2): number {
+export function calculateServingsMultiplier(baseServings: number = 1, targetServings: number = 1): number {
   logger.debug('scaler.calculateServingsMultiplier', `인분 배율 계산: 기준 ${baseServings} -> 목표 ${targetServings}`);
-  if (baseServings <= 0 || targetServings <= 0) return 1;
-  return targetServings / baseServings;
+  const validBase = Number(baseServings) >= 1 ? Number(baseServings) : 1;
+  const validTarget = Number(targetServings) >= 1 ? Number(targetServings) : validBase;
+  return validTarget / validBase;
 }

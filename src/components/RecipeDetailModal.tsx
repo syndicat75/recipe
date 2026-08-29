@@ -92,7 +92,10 @@ export const RecipeDetailModal: React.FC<RecipeDetailModalProps> = ({
   isAdmin = false,
   showToast,
 }) => {
-  const baseServings = recipe?.baseServings || 2;
+  const baseServings =
+    typeof recipe?.baseServings === 'number' && recipe.baseServings >= 1
+      ? recipe.baseServings
+      : 1;
   const [currentServings, setCurrentServings] = useState<number>(baseServings);
   const [checkedIngredients, setCheckedIngredients] = useState<Record<number, boolean>>({});
   const [completedSteps, setCompletedSteps] = useState<Record<number, boolean>>({});
@@ -104,7 +107,11 @@ export const RecipeDetailModal: React.FC<RecipeDetailModalProps> = ({
   useEffect(() => {
     if (recipe) {
       logger.info('RecipeDetailModal.useEffect', `레시피 상세 모달 열림: ${recipe.name}`);
-      setCurrentServings(recipe.baseServings || 2);
+      const initialServings =
+        typeof recipe.baseServings === 'number' && recipe.baseServings >= 1
+          ? recipe.baseServings
+          : 1;
+      setCurrentServings(initialServings);
       setCheckedIngredients({});
       setCompletedSteps({});
       setNoteInput(userNote || recipe.userNotes || '');

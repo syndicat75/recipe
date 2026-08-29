@@ -67,7 +67,27 @@ export function subscribeToPublicRecipes(
           imageUrl: data.imageUrl || undefined,
           cookingTimeMinutes: data.cookingTimeMinutes || undefined,
           difficulty: data.difficulty || undefined,
-          baseServings: data.baseServings || 2,
+          baseServings:
+            typeof data.baseServings === 'number' && data.baseServings >= 1
+              ? Math.round(data.baseServings)
+              : Number(data.baseServings) >= 1
+                ? Math.round(Number(data.baseServings))
+                : 1,
+          caloriesPerServing:
+            data.caloriesPerServing && Number(data.caloriesPerServing) > 0
+              ? Math.round(Number(data.caloriesPerServing))
+              : undefined,
+          totalCalories:
+            data.totalCalories && Number(data.totalCalories) > 0
+              ? Math.round(Number(data.totalCalories))
+              : undefined,
+          caloriesAnalyzedServings:
+            data.caloriesAnalyzedServings && Number(data.caloriesAnalyzedServings) > 0
+              ? Number(data.caloriesAnalyzedServings)
+              : undefined,
+          caloriesAnalyzedAt: data.caloriesAnalyzedAt ? Number(data.caloriesAnalyzedAt) : undefined,
+          caloriesConfidence: data.caloriesConfidence || undefined,
+          calorieBreakdown: data.calorieBreakdown || undefined,
           sharedWithFamily: Boolean(data.sharedWithFamily),
           sourceImageUrl: data.sourceImageUrl || undefined,
           isCustom: Boolean(data.isCustom),
@@ -209,7 +229,27 @@ export function subscribeToUserRecipes(
           imageUrl: data.imageUrl || undefined,
           cookingTimeMinutes: data.cookingTimeMinutes || undefined,
           difficulty: data.difficulty || undefined,
-          baseServings: data.baseServings || 2,
+          baseServings:
+            typeof data.baseServings === 'number' && data.baseServings >= 1
+              ? Math.round(data.baseServings)
+              : Number(data.baseServings) >= 1
+                ? Math.round(Number(data.baseServings))
+                : 1,
+          caloriesPerServing:
+            data.caloriesPerServing && Number(data.caloriesPerServing) > 0
+              ? Math.round(Number(data.caloriesPerServing))
+              : undefined,
+          totalCalories:
+            data.totalCalories && Number(data.totalCalories) > 0
+              ? Math.round(Number(data.totalCalories))
+              : undefined,
+          caloriesAnalyzedServings:
+            data.caloriesAnalyzedServings && Number(data.caloriesAnalyzedServings) > 0
+              ? Number(data.caloriesAnalyzedServings)
+              : undefined,
+          caloriesAnalyzedAt: data.caloriesAnalyzedAt ? Number(data.caloriesAnalyzedAt) : undefined,
+          caloriesConfidence: data.caloriesConfidence || undefined,
+          calorieBreakdown: data.calorieBreakdown || undefined,
           sharedWithFamily: Boolean(data.sharedWithFamily),
           sourceImageUrl: data.sourceImageUrl || undefined,
           isCustom: Boolean(data.isCustom),

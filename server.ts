@@ -82,13 +82,17 @@ async function startServer(): Promise<void> {
   app.post('/api/ai/import-recipe', async (req: Request, res: Response): Promise<void> => {
     res.setHeader('Content-Type', 'application/json');
     try {
-      const { url, text } = req.body as { url?: string; text?: string };
+      const { url, text, requestId } = req.body as {
+        url?: string;
+        text?: string;
+        requestId?: string;
+      };
       if (!url && !text) {
         res.status(400).json({ success: false, error: 'URL 또는 텍스트 중 하나를 입력해주세요.' });
         return;
       }
 
-      const result = await importRecipeFromTextOrUrl({ url, text });
+      const result = await importRecipeFromTextOrUrl({ url, text, requestId });
       if (!result.success) {
         res.status(500).json(result);
         return;
@@ -138,9 +142,10 @@ async function startServer(): Promise<void> {
   app.post('/api/ai/import-recipe-image', async (req: Request, res: Response): Promise<void> => {
     res.setHeader('Content-Type', 'application/json');
     try {
-      const { imageBase64, mimeType } = req.body as {
+      const { imageBase64, mimeType, requestId } = req.body as {
         imageBase64?: string;
         mimeType?: string;
+        requestId?: string;
       };
 
       if (!imageBase64 || !imageBase64.trim()) {
@@ -148,7 +153,7 @@ async function startServer(): Promise<void> {
         return;
       }
 
-      const result = await importRecipeFromImage({ imageBase64, mimeType });
+      const result = await importRecipeFromImage({ imageBase64, mimeType, requestId });
       if (!result.success) {
         res.status(500).json(result);
         return;
@@ -213,7 +218,7 @@ async function startServer(): Promise<void> {
         name,
         category,
         ingredients,
-        baseServings: Number(baseServings) || 2,
+        baseServings: Number(baseServings) >= 1 ? Number(baseServings) : 1,
       });
 
       if (!result.success) {

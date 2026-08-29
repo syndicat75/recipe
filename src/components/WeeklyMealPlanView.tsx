@@ -172,7 +172,7 @@ export const WeeklyMealPlanView: React.FC<WeeklyMealPlanViewProps> = ({
       date: dateStr,
       slot: slot,
       recipeId: recipe.id,
-      servings: recipe.baseServings || 2,
+      servings: typeof recipe.baseServings === 'number' && recipe.baseServings >= 1 ? recipe.baseServings : 1,
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
@@ -249,7 +249,9 @@ export const WeeklyMealPlanView: React.FC<WeeklyMealPlanViewProps> = ({
     weeklyEntries.forEach((entry) => {
       const recipe = allRecipes.find((r) => r.id === entry.recipeId);
       if (recipe && recipe.ingredients) {
-        const multiplier = calculateServingsMultiplier(recipe.baseServings || 2, entry.servings || 2);
+        const baseServ = typeof recipe.baseServings === 'number' && recipe.baseServings >= 1 ? recipe.baseServings : 1;
+        const targetServ = typeof entry.servings === 'number' && entry.servings >= 1 ? entry.servings : baseServ;
+        const multiplier = calculateServingsMultiplier(baseServ, targetServ);
         const scaledList = getScaledIngredientsList(recipe.ingredients, multiplier);
         allIngredients.push(...scaledList);
       }

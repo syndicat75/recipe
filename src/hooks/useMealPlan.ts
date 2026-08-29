@@ -56,7 +56,7 @@ export function useMealPlan(options: UseMealPlanOptions = {}): UseMealPlanReturn
         date,
         slot: 'single',
         recipeId: recipe.id,
-        servings: recipe.baseServings || 2,
+        servings: typeof recipe.baseServings === 'number' && recipe.baseServings >= 1 ? recipe.baseServings : 1,
         createdAt: now,
         updatedAt: now,
       };

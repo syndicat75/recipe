@@ -24,6 +24,8 @@ import {
   Upload,
   Image as ImageIcon,
   RotateCcw,
+  Plus,
+  Minus,
 } from 'lucide-react';
 import { APP_CONFIG, CATEGORY_CONFIG, CATEGORY_LIST } from '../config/appConfig';
 import { Recipe, RecipeCategory, SaveRecipeResult } from '../types/recipe';
@@ -131,8 +133,33 @@ export const ImportRecipeModal: React.FC<ImportRecipeModalProps> = ({
   const cameraInputRef = useRef<HTMLInputElement>(null);
 
   const [isLoading, setIsLoading] = useState(false);
+  const [loadingStep, setLoadingStep] = useState<number>(1);
+  const stepTimersRef = useRef<NodeJS.Timeout[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const clearStepTimers = useCallback(() => {
+    stepTimersRef.current.forEach((t) => clearTimeout(t));
+    stepTimersRef.current = [];
+  }, []);
+
+  React.useEffect(() => {
+    return () => {
+      clearStepTimers();
+    };
+  }, [clearStepTimers]);
+
+  const getLoadingMessage = () => {
+    if (loadingStep === 1) {
+      if (activeTab === 'url') return '🔗 레시피 페이지 확인 중...';
+      if (activeTab === 'image') return '📷 사진에서 레시피 판독 중...';
+      return '📄 입력된 텍스트 확인 중...';
+    }
+    if (loadingStep === 2) {
+      return '📄 재료와 조리법 추출 중...';
+    }
+    return '✨ 요리 데이터 정제 중...';
+  };
 
   // AI 분석 결과 검토 상태 (Step 2)
   const [parsedRecipe, setParsedRecipe] = useState<{
@@ -176,8 +203,11 @@ export const ImportRecipeModal: React.FC<ImportRecipeModalProps> = ({
   /**
    * AI 분석 요청 핸들러
    */
-  const handleAnalyze = async (e: React.FormEvent): Promise<void> => {
-    e.preventDefault();
+  const handleAnalyze = async (e?: React.FormEvent): Promise<void> => {
+    if (e && typeof e.preventDefault === 'function') {
+      e.preventDefault();
+    }
+    if (isLoading) return;
     setErrorMsg(null);
 
     const targetUrl = urlInput.trim();
@@ -197,19 +227,35 @@ export const ImportRecipeModal: React.FC<ImportRecipeModalProps> = ({
     }
 
     logger.info('ImportRecipeModal.handleAnalyze', `AI 레시피 분석 시작 (탭: ${activeTab})`);
+    
+    // 단계별 진행 상태 시작 (0~3초: 1단계, 3~8초: 2단계, 8초 이상: 3단계)
+    clearStepTimers();
+    setLoadingStep(1);
     setIsLoading(true);
+
+    const timer1 = setTimeout(() => {
+      setLoadingStep(2);
+    }, 3000);
+
+    const timer2 = setTimeout(() => {
+      setLoadingStep(3);
+    }, 8000);
+
+    stepTimersRef.current = [timer1, timer2];
 
     try {
       let endpoint: string = APP_CONFIG.ai.importEndpoint;
-      let bodyData: Record<string, unknown> = {};
+      const clientReqId = `client_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+      let bodyData: Record<string, unknown> = { requestId: clientReqId };
 
       if (activeTab === 'url') {
-        bodyData = { url: targetUrl };
+        bodyData.url = targetUrl;
       } else if (activeTab === 'text') {
-        bodyData = { text: targetText };
+        bodyData.text = targetText;
       } else if (activeTab === 'image') {
         endpoint = APP_CONFIG.ai.importImageEndpoint;
-        bodyData = { imageBase64: imagePreview, mimeType: 'image/jpeg' };
+        bodyData.imageBase64 = imagePreview;
+        bodyData.mimeType = 'image/jpeg';
       }
 
       interface RecipeAiResponsePayload {
@@ -226,7 +272,8 @@ export const ImportRecipeModal: React.FC<ImportRecipeModalProps> = ({
         lowConfidenceFields?: string[];
       }
 
-      const data = await callAiApi<RecipeAiResponsePayload>(endpoint, bodyData, 4.0);
+      // 최대 45초 타임아웃 적용 (서버 25~30초 처리 및 지수 백오프/fallback 여유분 확보)
+      const data = await callAiApi<RecipeAiResponsePayload>(endpoint, bodyData, 4.0, 45000);
 
       const resData = (activeTab === 'image' ? data.recipe : data.data) as RecipeAiResponsePayload | undefined;
       if (!resData) {
@@ -245,7 +292,12 @@ export const ImportRecipeModal: React.FC<ImportRecipeModalProps> = ({
         name: resData.name || '새로운 레시피',
         category: cat,
         icon: resData.icon || '🍳',
-        baseServings: Number(resData.baseServings) || 2,
+        baseServings:
+          typeof resData.baseServings === 'number' && resData.baseServings >= 1
+            ? Math.round(resData.baseServings)
+            : Number(resData.baseServings) >= 1
+              ? Math.round(Number(resData.baseServings))
+              : 1,
         ingredients: resData.ingredients || '',
         method: resData.method || '-',
         cookingTimeMinutes: Number(resData.cookingTimeMinutes) || 15,
@@ -264,6 +316,7 @@ export const ImportRecipeModal: React.FC<ImportRecipeModalProps> = ({
           : '레시피를 분석하는 중 문제가 발생했습니다. 사진이 흐릿하거나 잘렸는지 확인해주세요.'
       );
     } finally {
+      clearStepTimers();
       setIsLoading(false);
     }
   };
@@ -297,13 +350,14 @@ export const ImportRecipeModal: React.FC<ImportRecipeModalProps> = ({
       .filter(Boolean);
 
     const targetScope = isAdmin ? 'public' : 'local';
+    const normalizedServings = Math.max(1, Math.min(20, Math.round(Number(parsedRecipe.baseServings) || 1)));
 
     const newRecipe: Recipe = {
       id: Date.now(),
       name: finalName,
       category: parsedRecipe.category,
       icon: parsedRecipe.icon || '🥘',
-      baseServings: parsedRecipe.baseServings || 2,
+      baseServings: normalizedServings,
       ingredients: parsedRecipe.ingredients,
       ingredientCount: ingLines.length,
       method: parsedRecipe.method,
@@ -541,14 +595,79 @@ export const ImportRecipeModal: React.FC<ImportRecipeModalProps> = ({
                   </div>
                 )}
 
-                {errorMsg && (
-                  <div className="flex flex-col gap-2 rounded-2xl bg-rose-50 border border-rose-200/80 p-3.5 text-xs text-rose-800">
-                    <div className="flex items-center gap-2">
-                      <AlertCircle className="h-4 w-4 shrink-0 text-rose-600" />
-                      <span className="font-semibold">{errorMsg}</span>
+                {/* 진행 상태 단계별 안내 카드 (0~3초: 1단계, 3~8초: 2단계, 8초 이상: 3단계) */}
+                {isLoading && (
+                  <div className="rounded-2xl border border-orange-200 bg-orange-50/70 p-4 space-y-2.5 animate-fade-in">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-xs font-bold text-orange-950">
+                        <Loader2 className="h-4 w-4 animate-spin text-orange-600 shrink-0" />
+                        <span>{getLoadingMessage()}</span>
+                      </div>
+                      <span className="text-[11px] font-bold text-orange-600">단계 {loadingStep} / 3</span>
                     </div>
-                    {onOpenDirectRegister && (
-                      <div className="mt-1 flex items-center justify-end">
+
+                    {/* Progress Bar */}
+                    <div className="grid grid-cols-3 gap-1.5 pt-0.5">
+                      <div
+                        className={`h-1.5 rounded-full transition-all duration-500 ${
+                          loadingStep >= 1 ? 'bg-orange-500' : 'bg-orange-200'
+                        }`}
+                      />
+                      <div
+                        className={`h-1.5 rounded-full transition-all duration-500 ${
+                          loadingStep >= 2 ? 'bg-orange-500' : 'bg-orange-200'
+                        }`}
+                      />
+                      <div
+                        className={`h-1.5 rounded-full transition-all duration-500 ${
+                          loadingStep >= 3 ? 'bg-orange-500' : 'bg-orange-200'
+                        }`}
+                      />
+                    </div>
+                    <p className="text-[11px] text-stone-500">
+                      페이지 분량과 서버 상태에 따라 5~15초 정도 소요될 수 있습니다. 잠시만 기다려주세요.
+                    </p>
+                  </div>
+                )}
+
+                {errorMsg && (
+                  <div className="flex flex-col gap-3 rounded-2xl bg-rose-50 border border-rose-200/90 p-4 text-xs text-rose-800 animate-fade-in">
+                    <div className="flex items-start gap-2.5">
+                      <AlertCircle className="h-4 w-4 shrink-0 text-rose-600 mt-0.5" />
+                      <div className="space-y-1">
+                        <p className="font-bold text-rose-950 leading-snug">{errorMsg}</p>
+                        <p className="text-[11px] text-rose-700">
+                          입력하신 내용은 안전하게 보존되어 있습니다. [다시 분석]을 누르거나 텍스트 입력으로 전환할 수 있습니다.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center justify-end gap-2 pt-1 border-t border-rose-200/60">
+                      <button
+                        type="button"
+                        onClick={() => handleAnalyze()}
+                        disabled={isLoading}
+                        className="inline-flex items-center gap-1.5 rounded-xl bg-orange-500 hover:bg-orange-600 active:scale-95 px-3 py-1.5 font-bold text-white shadow-xs transition disabled:opacity-50"
+                      >
+                        <RotateCcw className="h-3.5 w-3.5" />
+                        <span>다시 분석</span>
+                      </button>
+
+                      {activeTab === 'url' && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActiveTab('text');
+                            setErrorMsg(null);
+                          }}
+                          className="inline-flex items-center gap-1.5 rounded-xl bg-white px-3 py-1.5 font-bold text-stone-700 shadow-xs border border-stone-200 hover:bg-stone-50 active:scale-95 transition"
+                        >
+                          <FileText className="h-3.5 w-3.5 text-stone-500" />
+                          <span>텍스트 직접 입력으로 전환</span>
+                        </button>
+                      )}
+
+                      {onOpenDirectRegister && (
                         <button
                           type="button"
                           onClick={() => {
@@ -558,12 +677,12 @@ export const ImportRecipeModal: React.FC<ImportRecipeModalProps> = ({
                               imageUrl: activeTab === 'image' && imagePreview ? imagePreview : undefined,
                             });
                           }}
-                          className="inline-flex items-center gap-1.5 rounded-xl bg-white px-3.5 py-1.5 font-bold text-orange-700 shadow-xs border border-orange-200 hover:bg-orange-50 active:scale-95 transition"
+                          className="inline-flex items-center gap-1.5 rounded-xl bg-white px-3 py-1.5 font-bold text-stone-700 shadow-xs border border-stone-200 hover:bg-stone-50 active:scale-95 transition"
                         >
-                          <span>✍️ 직접 레시피 등록으로 이동</span>
+                          <span>✍️ 직접 레시피 등록</span>
                         </button>
-                      </div>
-                    )}
+                      )}
+                    </div>
                   </div>
                 )}
 
@@ -576,7 +695,7 @@ export const ImportRecipeModal: React.FC<ImportRecipeModalProps> = ({
                     {isLoading ? (
                       <>
                         <Loader2 className="h-4 w-4 animate-spin" />
-                        <span>AI 분석 중...</span>
+                        <span>{getLoadingMessage()}</span>
                       </>
                     ) : (
                       <>
@@ -650,14 +769,63 @@ export const ImportRecipeModal: React.FC<ImportRecipeModalProps> = ({
                 <div className="grid grid-cols-3 gap-3">
                   <div className="space-y-1">
                     <label className="block text-xs font-bold text-stone-700">기준 인분</label>
-                    <input
-                      type="number"
-                      min={1}
-                      max={10}
-                      value={parsedRecipe.baseServings}
-                      onChange={(e) => setParsedRecipe({ ...parsedRecipe, baseServings: Number(e.target.value) || 2 })}
-                      className="w-full rounded-xl border border-stone-200 bg-stone-50/60 p-2 text-xs text-stone-900"
-                    />
+                    <div className="flex items-center justify-between rounded-xl border border-stone-200 bg-stone-50/60 p-1">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setParsedRecipe((prev) =>
+                            prev
+                              ? {
+                                  ...prev,
+                                  baseServings: Math.max(1, (Number(prev.baseServings) || 1) - 1),
+                                }
+                              : null
+                          )
+                        }
+                        disabled={(Number(parsedRecipe.baseServings) || 1) <= 1}
+                        className="flex h-6 w-6 items-center justify-center rounded-lg bg-orange-100 text-orange-700 hover:bg-orange-200 disabled:opacity-30 disabled:pointer-events-none"
+                      >
+                        <Minus className="h-3 w-3" />
+                      </button>
+                      <div className="flex items-center gap-0.5 text-xs font-bold text-stone-800">
+                        <input
+                          type="number"
+                          min={1}
+                          max={20}
+                          value={parsedRecipe.baseServings}
+                          onChange={(e) => {
+                            const val = parseInt(e.target.value, 10);
+                            setParsedRecipe((prev) =>
+                              prev
+                                ? {
+                                    ...prev,
+                                    baseServings: isNaN(val) ? 1 : Math.max(1, Math.min(20, val)),
+                                  }
+                                : null
+                            );
+                          }}
+                          className="w-7 text-center font-black bg-transparent outline-none"
+                        />
+                        <span className="text-[11px] font-medium text-stone-500">인분</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setParsedRecipe((prev) =>
+                            prev
+                              ? {
+                                  ...prev,
+                                  baseServings: Math.min(20, (Number(prev.baseServings) || 1) + 1),
+                                }
+                              : null
+                          )
+                        }
+                        disabled={(Number(parsedRecipe.baseServings) || 1) >= 20}
+                        className="flex h-6 w-6 items-center justify-center rounded-lg bg-orange-100 text-orange-700 hover:bg-orange-200 disabled:opacity-30 disabled:pointer-events-none"
+                      >
+                        <Plus className="h-3 w-3" />
+                      </button>
+                    </div>
                   </div>
                   <div className="space-y-1">
                     <label className="block text-xs font-bold text-stone-700">조리 시간(분)</label>

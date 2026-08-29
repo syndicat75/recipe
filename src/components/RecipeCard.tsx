@@ -4,7 +4,7 @@
  */
 
 import React from 'react';
-import { Bookmark, Clock, Flame, ArrowRight, Sparkles } from 'lucide-react';
+import { Bookmark, Clock, Flame, ArrowRight, Sparkles, Users } from 'lucide-react';
 import { CATEGORY_CONFIG } from '../config/appConfig';
 import { Recipe } from '../types/recipe';
 import { logger } from '../utils/logger';
@@ -182,6 +182,14 @@ export const RecipeCard: React.FC<RecipeCardProps> = ({
                   <span>{recipe.cookingTimeMinutes}분</span>
                 </span>
               )}
+              <span className="flex items-center gap-1 text-stone-600 font-medium" title="기준 인분">
+                <Users className="h-3.5 w-3.5 text-amber-600" />
+                <span>
+                  {typeof recipe.baseServings === 'number' && recipe.baseServings >= 1
+                    ? recipe.baseServings
+                    : 1}인분
+                </span>
+              </span>
               {recipe.difficulty && (
                 <span className="flex items-center gap-1">
                   <Flame className="h-3.5 w-3.5 text-orange-500" />

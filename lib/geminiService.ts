@@ -7,9 +7,24 @@
  */
 
 import { GoogleGenAI, Type } from '@google/genai';
+import { fetchAndParseRecipePage } from './recipePageParser';
 
 type GenerateContentParameters = Parameters<GoogleGenAI['models']['generateContent']>[0];
 type GenerateContentResult = Awaited<ReturnType<GoogleGenAI['models']['generateContent']>>;
+
+export interface GenerateFallbackOptions {
+  retryMode?: 'standard' | 'fast';
+  startedAt?: number;
+  maxServerBudgetMs?: number;
+  requestId?: string;
+}
+
+export interface ModelExecutionMeta {
+  modelUsed: string;
+  retryCount: number;
+  fallbackUsed: boolean;
+  aiDurationMs: number;
+}
 
 /**
  * Gemini 클라이언트 인스턴스 지연(Lazy) 생성 함수
@@ -31,22 +46,44 @@ export function getGeminiClient(): GoogleGenAI {
  * Gemini 3.7 Flash 모델 과부하(503/UNAVAILABLE/High demand/429) 발생 시
  * 지수 백오프(Exponential Backoff + Jitter)로 재시도하고,
  * 지속 실패 시 gemini-3.6-flash로 자동 Fallback하는 공통 호출 함수.
+ * retryMode가 'fast'인 경우(레시피 가져오기 전용) 최대 1회 빠른 재시도 후 즉시 fallback하여 시간 초과를 방지합니다.
  */
 async function generateWithFallback(
   ai: GoogleGenAI,
-  request: Omit<GenerateContentParameters, 'model'> & { model?: string }
-): Promise<GenerateContentResult> {
+  request: Omit<GenerateContentParameters, 'model'> & { model?: string },
+  options: GenerateFallbackOptions = {}
+): Promise<GenerateContentResult & { executionMeta?: ModelExecutionMeta }> {
   const primaryModel = 'gemini-3.7-flash';
   const fallbackModel = 'gemini-3.6-flash';
-  const delays = [1000, 2000];
+  const retryMode = options.retryMode || 'standard';
+  const startedAt = options.startedAt || Date.now();
+  const callStart = Date.now();
+  const reqTag = options.requestId ? `[${options.requestId}] ` : '';
 
-  for (let attempt = 0; attempt < 3; attempt++) {
+  const isFast = retryMode === 'fast';
+  const maxAttempts = isFast ? 2 : 3;
+  const delays = isFast ? [800] : [1000, 2000];
+
+  let retryCount = 0;
+  let fallbackNeeded = false;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
-      return await ai.models.generateContent({
+      const res = await ai.models.generateContent({
         ...request,
         model: primaryModel,
       });
+
+      return Object.assign(res, {
+        executionMeta: {
+          modelUsed: primaryModel,
+          retryCount: attempt,
+          fallbackUsed: false,
+          aiDurationMs: Date.now() - callStart,
+        },
+      });
     } catch (error) {
+      retryCount = attempt + 1;
       const message = error instanceof Error ? error.message : String(error);
       const isRetryable =
         message.includes('503') ||
@@ -61,26 +98,49 @@ async function generateWithFallback(
         throw error;
       }
 
-      if (attempt < 2) {
-        console.warn(`Gemini 3.7 Flash overloaded - retry ${attempt + 1}`);
-        const jitter = Math.floor(Math.random() * 400);
-        await new Promise((resolve) => setTimeout(resolve, delays[attempt] + jitter));
+      const elapsed = Date.now() - startedAt;
+      // 전체 시간 예산 초과 감지: 이미 20초 이상 지났으면 추가 재시도 없이 즉시 Fallback
+      if (isFast && elapsed > 20000) {
+        console.warn(`${reqTag}Gemini 3.7 Fast Mode - 경과 시간(${elapsed}ms) 초과로 추가 재시도 생략 후 즉시 3.6 Fallback 전환`);
+        fallbackNeeded = true;
+        break;
+      }
+
+      if (attempt < maxAttempts - 1) {
+        const jitter = Math.floor(Math.random() * 300);
+        const delay = (delays[attempt] || 800) + jitter;
+        console.warn(`${reqTag}Gemini 3.7 Flash 일시 과부하 - ${delay}ms 후 재시도 (${attempt + 1}/${maxAttempts - 1})`);
+        await new Promise((resolve) => setTimeout(resolve, delay));
       } else {
-        console.warn(`Gemini 3.7 Flash overloaded - retry 2 failed. Falling back to Gemini 3.6 Flash`);
+        console.warn(`${reqTag}Gemini 3.7 Flash 재시도 한도 도달 - Gemini 3.6 Flash Fallback 실행`);
+        fallbackNeeded = true;
       }
     }
   }
 
-  console.info(`Falling back to ${fallbackModel}`);
-  try {
-    return await ai.models.generateContent({
-      ...request,
-      model: fallbackModel,
-    });
-  } catch (fallbackError) {
-    console.error(`Falling back to ${fallbackModel} failed:`, fallbackError);
-    throw fallbackError;
+  if (fallbackNeeded) {
+    console.info(`${reqTag}Falling back to ${fallbackModel}`);
+    try {
+      const fallbackRes = await ai.models.generateContent({
+        ...request,
+        model: fallbackModel,
+      });
+
+      return Object.assign(fallbackRes, {
+        executionMeta: {
+          modelUsed: fallbackModel,
+          retryCount,
+          fallbackUsed: true,
+          aiDurationMs: Date.now() - callStart,
+        },
+      });
+    } catch (fallbackError) {
+      console.error(`${reqTag}Falling back to ${fallbackModel} failed:`, fallbackError);
+      throw fallbackError;
+    }
   }
+
+  throw new Error('AI 모델 호출 실패');
 }
 
 /**
@@ -154,18 +214,37 @@ function formatAiServiceError(
 
 /**
  * 1. URL 또는 텍스트 기반 레시피 구조화 추출
- * @param params url 또는 text
- * @returns 정제된 레시피 데이터
+ * schema.org/Recipe JSON-LD를 최우선 탐색하여 광고/댓글/메뉴를 배제한 최소 데이터만 Gemini에 전달합니다.
+ * JSON-LD 부재 시에만 정제된 HTML 본문을 전달합니다.
+ * @param params url, text, requestId
+ * @returns 정제된 레시피 데이터 및 성능 진단 메타
  */
 export async function importRecipeFromTextOrUrl(params: {
   url?: string;
   text?: string;
+  requestId?: string;
 }): Promise<{
   success: boolean;
   data?: Record<string, unknown>;
   error?: string;
   details?: string;
+  meta?: {
+    sourceType: 'jsonld' | 'html' | 'text';
+    fetchDurationMs: number;
+    parseDurationMs: number;
+    aiDurationMs: number;
+    totalDurationMs: number;
+    modelUsed: string;
+    retryCount: number;
+    fallbackUsed: boolean;
+    requestId: string;
+  };
 }> {
+  const startedAt = Date.now();
+  const reqId =
+    params.requestId ||
+    (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `req_${Date.now()}`);
+
   try {
     const { url, text } = params;
     if (!url && !text) {
@@ -176,86 +255,150 @@ export async function importRecipeFromTextOrUrl(params: {
     }
 
     const ai = getGeminiClient();
+    let sourceType: 'jsonld' | 'html' | 'text' = 'text';
+    let fetchDurationMs = 0;
+    let parseDurationMs = 0;
     let sourceContent = '';
+    let hintServings: number | undefined;
 
+    // 1. URL 제공된 경우: 6초 타임아웃 웹페이지 조회 및 JSON-LD 우선 파싱
     if (url && url.trim()) {
-      try {
-        const fetchRes = await fetch(url.trim(), {
-          headers: {
-            'User-Agent':
-              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          },
-          signal: AbortSignal.timeout(10000),
-        });
+      const parseResult = await fetchAndParseRecipePage(url.trim(), 6000);
+      fetchDurationMs = parseResult.fetchDurationMs;
+      parseDurationMs = parseResult.parseDurationMs;
 
-        if (fetchRes.ok) {
-          const html = await fetchRes.text();
-          const cleanedText = cleanHtmlText(html);
-          sourceContent = `[웹페이지 URL: ${url}]\n${cleanedText}`;
-        } else {
-          sourceContent = `[URL: ${url}] (웹페이지 직접 조회 실패, URL 힌트 기반으로 추출)`;
+      if (parseResult.success) {
+        sourceType = parseResult.sourceType as 'jsonld' | 'html';
+        sourceContent = parseResult.extractedText;
+        if (parseResult.jsonLdRecipe?.servings) {
+          hintServings = parseResult.jsonLdRecipe.servings;
         }
-      } catch (fetchErr) {
-        console.warn('URL Fetching failed, fallback to text prompt:', fetchErr);
-        sourceContent = `[URL: ${url}] (웹페이지 접속이 제한되었습니다. 힌트 기반으로 유추해주세요.)`;
+        console.info(
+          `[recipe-import][${reqId}] URL fetch: ${fetchDurationMs}ms (${sourceType}), parse: ${parseDurationMs}ms`
+        );
+      } else {
+        console.warn(
+          `[recipe-import][${reqId}] URL fetch 실패 (${fetchDurationMs}ms): ${parseResult.errorMessage}`
+        );
+
+        // URL 조회가 막혔거나 실패한 경우, 사용자가 입력한 추가 텍스트가 있으면 텍스트로 전환
+        if (text && text.trim()) {
+          sourceType = 'text';
+          sourceContent = `[사용자 입력 텍스트]:\n${text.trim()}`;
+        } else {
+          // 본문을 읽지 못했는데 임의로 레시피를 지어내지 않고 정직하게 텍스트 붙여넣기 안내 반환
+          return {
+            success: false,
+            error:
+              parseResult.errorMessage ||
+              '해당 사이트에서 레시피 본문을 읽지 못했습니다. 레시피 내용을 복사해서 "텍스트 가져오기"에 붙여넣어 주세요.',
+          };
+        }
       }
     }
 
-    if (text && text.trim()) {
-      sourceContent += (sourceContent ? '\n\n' : '') + `[사용자 입력 텍스트]:\n${text.trim()}`;
+    // 2. 텍스트 병합 처리
+    if (text && text.trim() && sourceType !== 'text') {
+      sourceContent += (sourceContent ? '\n\n' : '') + `[사용자 추가 텍스트/메모]:\n${text.trim()}`;
+    } else if (text && text.trim() && !sourceContent) {
+      sourceType = 'text';
+      sourceContent = `[사용자 입력 텍스트]:\n${text.trim()}`;
     }
 
+    // 3. Gemini 구조화 추출 프롬프트 (군더더기 없는 JSON 전용)
     const prompt = `당신은 대한민국 최고의 요리 연구가이자 레시피 정리 전문가입니다.
-제공된 요리 레시피 원본 내용 또는 웹페이지 텍스트를 분석하여 사용자가 바로 요리할 수 있도록 깔끔하고 정확한 JSON 형식으로 정제해주세요.
+제공된 요리 레시피 원본 내용 또는 구조화 데이터를 분석하여 사용자가 바로 요리할 수 있도록 군더더기 없는 JSON 형식으로 정제해주세요.
 
 [분석할 원본 내용]:
 ${sourceContent}
 
-[작성 규칙]:
+[작성 규칙 - 엄격 준수]:
 1. name: 한국어 표준 음식명 (예: 김치찌개, 소고기 미역국, 계란말이 등)
 2. category: 반드시 다음 7개 중 하나만 선택: '반찬', '소스·양념', '국·찌개', '중식·양식', '밥·한그릇', '계란요리', '기타'
 3. icon: 해당 요리와 가장 잘 어울리는 대표 단일 이모지 (예: 🍳, 🥘, 🥗, 🥣, 🍽️, 🍛, 🍚, 🥪, 🍜, 🥩 등)
-4. baseServings: 기준 인분 수 (명시 없으면 2)
+4. baseServings: 기준 인분 수 (원문이나 구조화 데이터에 명시된 인분을 최우선으로 추출하세요. 1인분이면 반드시 1, 2인분이면 2, 4인분이면 4. 원문에 1인분이 적혀 있으면 절대로 2로 바꾸지 마세요. 원문에 인분 정보가 전혀 없을 때만 기본값 1을 지정하세요)
 5. ingredients: 재료 및 분량을 줄바꿈(\\n)으로 구분된 하나의 문자열로 작성
 6. method: 조리 순서를 1단계부터 알기 쉽게 번호와 줄바꿈(\\n)으로 구분된 하나의 문자열로 작성
 7. cookingTimeMinutes: 예상 조리시간(분 단위 정수, 1~180)
 8. difficulty: '쉬움', '보통', '어려움' 중 하나
-9. tips: 이 요리를 더 맛있게 만들 수 있는 비법이나 주의점 (1~2문장)`;
+9. tips: 이 요리를 더 맛있게 만들 수 있는 핵심 비법이나 주의점 (1~2문장)`;
 
-    const response = await generateWithFallback(ai, {
-      contents: prompt,
-      config: {
-        systemInstruction: 'You are an expert Korean chef and culinary data parser.',
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            name: { type: Type.STRING, description: '요리 이름' },
-            category: {
-              type: Type.STRING,
-              description: '카테고리 (반찬, 소스·양념, 국·찌개, 중식·양식, 밥·한그릇, 계란요리, 기타 중 하나)',
+    const response = await generateWithFallback(
+      ai,
+      {
+        contents: prompt,
+        config: {
+          systemInstruction: 'You are an expert Korean chef and culinary data parser. Output pure JSON without markdown explanation.',
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              name: { type: Type.STRING, description: '요리 이름' },
+              category: {
+                type: Type.STRING,
+                description: '카테고리 (반찬, 소스·양념, 국·찌개, 중식·양식, 밥·한그릇, 계란요리, 기타 중 하나)',
+              },
+              icon: { type: Type.STRING, description: '대표 이모지' },
+              baseServings: { type: Type.INTEGER, description: '기준 인분 수 (원문 명시 인분 최우선, 없으면 1)' },
+              ingredients: { type: Type.STRING, description: '줄바꿈으로 구분된 재료 목록' },
+              method: { type: Type.STRING, description: '줄바꿈으로 구분된 조리 순서' },
+              cookingTimeMinutes: { type: Type.INTEGER, description: '예상 조리시간 (분)' },
+              difficulty: { type: Type.STRING, description: '난이도 (쉬움, 보통, 어려움)' },
+              tips: { type: Type.STRING, description: '조리 꿀팁 및 조언' },
             },
-            icon: { type: Type.STRING, description: '대표 이모지' },
-            baseServings: { type: Type.INTEGER, description: '기준 인분 수 (기본 2)' },
-            ingredients: { type: Type.STRING, description: '줄바꿈으로 구분된 재료 목록' },
-            method: { type: Type.STRING, description: '줄바꿈으로 구분된 조리 순서' },
-            cookingTimeMinutes: { type: Type.INTEGER, description: '예상 조리시간 (분)' },
-            difficulty: { type: Type.STRING, description: '난이도 (쉬움, 보통, 어려움)' },
-            tips: { type: Type.STRING, description: '조리 꿀팁 및 조언' },
+            required: ['name', 'category', 'icon', 'ingredients', 'method', 'cookingTimeMinutes', 'difficulty'],
           },
-          required: ['name', 'category', 'icon', 'ingredients', 'method', 'cookingTimeMinutes', 'difficulty'],
         },
       },
-    });
+      {
+        retryMode: 'fast',
+        startedAt,
+        requestId: reqId,
+      }
+    );
 
     const parsedJson = safeParseGeminiJson<Record<string, unknown>>(response.text);
+
+    // baseServings 검증: JSON-LD 명시값 또는 Gemini 추출값 우선, 없으면 1
+    const rawServings = parsedJson.baseServings;
+    const finalServings =
+      typeof rawServings === 'number' && rawServings >= 1
+        ? Math.round(rawServings)
+        : hintServings && hintServings >= 1
+          ? hintServings
+          : 1;
+
+    const aiDurationMs = response.executionMeta?.aiDurationMs || 0;
+    const totalDurationMs = Date.now() - startedAt;
+    const modelUsed = response.executionMeta?.modelUsed || 'gemini-3.7-flash';
+    const retryCount = response.executionMeta?.retryCount || 0;
+    const fallbackUsed = response.executionMeta?.fallbackUsed || false;
+
+    console.info(
+      `[recipe-import][${reqId}] Gemini ${modelUsed}: ${aiDurationMs}ms (retry: ${retryCount}, fallback: ${fallbackUsed}), Total: ${totalDurationMs}ms`
+    );
+
     return {
       success: true,
-      data: parsedJson,
+      data: {
+        ...parsedJson,
+        baseServings: finalServings,
+      },
+      meta: {
+        sourceType,
+        fetchDurationMs,
+        parseDurationMs,
+        aiDurationMs,
+        totalDurationMs,
+        modelUsed,
+        retryCount,
+        fallbackUsed,
+        requestId: reqId,
+      },
     };
   } catch (error) {
-    console.error('Error importing recipe from text/url:', error);
+    const totalDurationMs = Date.now() - startedAt;
+    console.error(`[recipe-import][${reqId}] Error after ${totalDurationMs}ms:`, error);
     const errObj = formatAiServiceError(
       error,
       '레시피 분석 중 오류가 발생했습니다. 직접 입력하거나 텍스트를 조금 더 자세히 입력해주세요.'
@@ -269,18 +412,33 @@ ${sourceContent}
 
 /**
  * 2. 사진(요리책, 손글씨 메모, 포장지, 캡처) 기반 멀티모달 OCR 레시피 추출
- * @param params imageBase64 및 mimeType
- * @returns 추출된 구조화 레시피 데이터
+ * @param params imageBase64, mimeType, requestId
+ * @returns 추출된 구조화 레시피 데이터 및 메타
  */
 export async function importRecipeFromImage(params: {
   imageBase64?: string;
   mimeType?: string;
+  requestId?: string;
 }): Promise<{
   success: boolean;
   recipe?: Record<string, unknown>;
   error?: string;
   details?: string;
+  meta?: {
+    sourceType: 'image';
+    aiDurationMs: number;
+    totalDurationMs: number;
+    modelUsed: string;
+    retryCount: number;
+    fallbackUsed: boolean;
+    requestId: string;
+  };
 }> {
+  const startedAt = Date.now();
+  const reqId =
+    params.requestId ||
+    (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `req_${Date.now()}`);
+
   try {
     const { imageBase64, mimeType = 'image/jpeg' } = params;
 
@@ -305,61 +463,70 @@ export async function importRecipeFromImage(params: {
 3. 사진에 '간장'이라고만 적혀 있으면 '간장'으로만 추출하세요. 임의로 '간장 1큰술'로 추측해서 채우지 마세요.
 4. 글씨가 흐리거나 잘 보이지 않는 부분은 글자 뒤에 '(확인 필요)' 또는 '?'를 붙이고, lowConfidenceFields 배열에 해당 필드명(예: 'ingredients', 'cookingTimeMinutes' 등)을 추가하세요.
 5. 카테고리는 다음 7개 중 가장 적절한 1개를 선택하세요: '반찬', '소스·양념', '국·찌개', '중식·양식', '밥·한그릇', '계란요리', '기타'
-6. 기준 인분 정보가 사진에 명시되어 있다면 baseServings(숫자)로 추출하고, 없으면 2로 지정하세요.
+6. 기준 인분 정보가 사진에 명시되어 있다면 baseServings(숫자)로 추출하고, 없으면 1로 지정하세요.
 7. 재료(ingredients)는 줄바꿈(\\n)으로 구분된 하나의 문자열로 작성하세요. (예: "돼지고기 150g\\n신김치 1/4포기\\n두부 1/2모")
 8. 조리법(method)은 각 단계를 번호와 줄바꿈(\\n)으로 구분하여 작성하세요.`;
 
-    const response = await generateWithFallback(ai, {
-      contents: [
-        {
-          text: prompt,
-        },
-        {
-          inlineData: {
-            mimeType: mimeType,
-            data: cleanedBase64,
+    const response = await generateWithFallback(
+      ai,
+      {
+        contents: [
+          {
+            text: prompt,
           },
-        },
-      ],
-      config: {
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            isRecipeFound: {
-              type: Type.BOOLEAN,
-              description: '사진 내 레시피(재료 또는 조리법) 텍스트 식별 여부',
-            },
-            errorMessage: {
-              type: Type.STRING,
-              description: '레시피 미식별 시 안내 메시지',
-            },
-            name: { type: Type.STRING, description: '요리 이름' },
-            category: {
-              type: Type.STRING,
-              description: '카테고리 (반찬, 소스·양념, 국·찌개, 중식·양식, 밥·한그릇, 계란요리, 기타)',
-            },
-            icon: { type: Type.STRING, description: '가장 잘 어울리는 음식 단일 이모지 (예: 🥘, 🍛)' },
-            baseServings: { type: Type.INTEGER, description: '사진에 적힌 기준 인분 수 (명시 없으면 2)' },
-            ingredients: { type: Type.STRING, description: '재료 목록 (줄바꿈 구분)' },
-            method: { type: Type.STRING, description: '조리 순서 (번호와 줄바꿈 구분)' },
-            cookingTimeMinutes: { type: Type.INTEGER, description: '조리 시간 (분)' },
-            difficulty: {
-              type: Type.STRING,
-              enum: ['쉬움', '보통', '어려움'],
-              description: '난이도',
-            },
-            tip: { type: Type.STRING, description: '사진에 적힌 조리 팁 또는 보조 메모' },
-            lowConfidenceFields: {
-              type: Type.ARRAY,
-              items: { type: Type.STRING },
-              description: '글씨가 흐리거나 판독이 불확실했던 필드명 목록',
+          {
+            inlineData: {
+              mimeType: mimeType,
+              data: cleanedBase64,
             },
           },
-          required: ['name', 'category', 'icon', 'ingredients', 'method'],
+        ],
+        config: {
+          systemInstruction: 'You are an expert Korean OCR and recipe data parser. Output pure JSON without markdown explanation.',
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              isRecipeFound: {
+                type: Type.BOOLEAN,
+                description: '사진 내 레시피(재료 또는 조리법) 텍스트 식별 여부',
+              },
+              errorMessage: {
+                type: Type.STRING,
+                description: '레시피 미식별 시 안내 메시지',
+              },
+              name: { type: Type.STRING, description: '요리 이름' },
+              category: {
+                type: Type.STRING,
+                description: '카테고리 (반찬, 소스·양념, 국·찌개, 중식·양식, 밥·한그릇, 계란요리, 기타)',
+              },
+              icon: { type: Type.STRING, description: '가장 잘 어울리는 음식 단일 이모지 (예: 🥘, 🍛)' },
+              baseServings: { type: Type.INTEGER, description: '사진에 적힌 기준 인분 수 (명시 없으면 1)' },
+              ingredients: { type: Type.STRING, description: '재료 목록 (줄바꿈 구분)' },
+              method: { type: Type.STRING, description: '조리 순서 (번호와 줄바꿈 구분)' },
+              cookingTimeMinutes: { type: Type.INTEGER, description: '조리 시간 (분)' },
+              difficulty: {
+                type: Type.STRING,
+                enum: ['쉬움', '보통', '어려움'],
+                description: '난이도',
+              },
+              tip: { type: Type.STRING, description: '사진에 적힌 조리 팁 또는 보조 메모' },
+              lowConfidenceFields: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING },
+                description: '글씨가 흐리거나 판독이 불확실했던 필드명 목록',
+              },
+            },
+            required: ['name', 'category', 'icon', 'ingredients', 'method'],
+          },
         },
       },
-    });
+      {
+        retryMode: 'fast',
+        startedAt,
+        requestId: reqId,
+      }
+    );
 
     interface ImageRecipeResult {
       isRecipeFound?: boolean;
@@ -388,13 +555,28 @@ export async function importRecipeFromImage(params: {
       };
     }
 
+    const aiDurationMs = response.executionMeta?.aiDurationMs || 0;
+    const totalDurationMs = Date.now() - startedAt;
+    const modelUsed = response.executionMeta?.modelUsed || 'gemini-3.7-flash';
+    const retryCount = response.executionMeta?.retryCount || 0;
+    const fallbackUsed = response.executionMeta?.fallbackUsed || false;
+
+    console.info(
+      `[recipe-import-image][${reqId}] Gemini ${modelUsed}: ${aiDurationMs}ms (retry: ${retryCount}, fallback: ${fallbackUsed}), Total: ${totalDurationMs}ms`
+    );
+
     return {
       success: true,
       recipe: {
         name: parsedData.name || '가져온 레시피',
         category: parsedData.category || '기타',
         icon: parsedData.icon || '🍳',
-        baseServings: Number(parsedData.baseServings) || 2,
+        baseServings:
+          typeof parsedData.baseServings === 'number' && parsedData.baseServings >= 1
+            ? Math.round(parsedData.baseServings)
+            : Number(parsedData.baseServings) >= 1
+              ? Math.round(Number(parsedData.baseServings))
+              : 1,
         ingredients: parsedData.ingredients || '',
         method: parsedData.method || '-',
         cookingTimeMinutes: Number(parsedData.cookingTimeMinutes) || 15,
@@ -402,9 +584,19 @@ export async function importRecipeFromImage(params: {
         tip: parsedData.tip || '',
         lowConfidenceFields: Array.isArray(parsedData.lowConfidenceFields) ? parsedData.lowConfidenceFields : [],
       },
+      meta: {
+        sourceType: 'image',
+        aiDurationMs,
+        totalDurationMs,
+        modelUsed,
+        retryCount,
+        fallbackUsed,
+        requestId: reqId,
+      },
     };
   } catch (error) {
-    console.error('Error importing recipe from image:', error);
+    const totalDurationMs = Date.now() - startedAt;
+    console.error(`[recipe-import-image][${reqId}] Error after ${totalDurationMs}ms:`, error);
     const errObj = formatAiServiceError(
       error,
       '사진에서 레시피를 분석하는 중 오류가 발생했습니다. 사진이 선명한지 확인 후 다시 시도해주세요.'
@@ -624,7 +816,7 @@ export async function analyzeRecipeCalories(params: {
   details?: string;
 }> {
   try {
-    const { recipeId, name, category = '기타', ingredients, baseServings = 2 } = params;
+    const { recipeId, name, category = '기타', ingredients, baseServings } = params;
 
     if (!name || !ingredients || !ingredients.trim()) {
       return {
@@ -634,7 +826,12 @@ export async function analyzeRecipeCalories(params: {
     }
 
     const ai = getGeminiClient();
-    const servings = Math.max(1, Number(baseServings) || 2);
+    const servings =
+      typeof baseServings === 'number' && baseServings >= 1
+        ? Math.round(baseServings)
+        : Number(baseServings) >= 1
+          ? Math.round(Number(baseServings))
+          : 1;
 
     const prompt = `당신은 한식 및 일반 가정식의 영양과 열량을 과학적이고 현실적으로 분석하는 전문 영양사입니다.
 제공된 레시피 이름과 재료 목록, 기준 인분 수를 분석하여 현실적인 예상 칼로리(kcal)를 산출해주세요.

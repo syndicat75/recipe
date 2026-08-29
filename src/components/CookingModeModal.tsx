@@ -448,7 +448,13 @@ export const CookingModeModal: React.FC<CookingModeModalProps> = ({
               <span>{recipe.category}</span>
               <span>·</span>
               <span className="text-orange-400 font-bold">
-                {portionMultiplier}배 ({Math.round((recipe.baseServings || 2) * portionMultiplier)}인분)
+                {portionMultiplier}배 (
+                {Math.round(
+                  (typeof recipe.baseServings === 'number' && recipe.baseServings >= 1
+                    ? recipe.baseServings
+                    : 1) * portionMultiplier
+                )}
+                인분)
               </span>
             </div>
           </div>

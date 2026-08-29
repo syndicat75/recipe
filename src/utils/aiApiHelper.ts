@@ -19,6 +19,17 @@ export interface AiApiResponse<T = unknown> {
   answer?: string;
   recommendedRecipeId?: number | null;
   reason?: string;
+  meta?: {
+    sourceType?: 'jsonld' | 'html' | 'text' | 'image';
+    fetchDurationMs?: number;
+    parseDurationMs?: number;
+    aiDurationMs?: number;
+    totalDurationMs?: number;
+    modelUsed?: string;
+    retryCount?: number;
+    fallbackUsed?: boolean;
+    requestId?: string;
+  };
 }
 
 /**
@@ -26,14 +37,16 @@ export interface AiApiResponse<T = unknown> {
  * @param endpoint API 엔드포인트 URL (예: /api/ai/import-recipe-image)
  * @param payload 요청 본문 객체
  * @param maxPayloadMb 허용 최대 페이로드 용량 (MB 단위, 기본 4.0MB)
+ * @param timeoutMs 클라이언트 요청 제한시간 (밀리초, 기본 35000ms)
  * @returns 안전하게 파싱된 AI API 응답 객체
  */
 export async function callAiApi<T = unknown>(
   endpoint: string,
   payload: Record<string, unknown>,
-  maxPayloadMb: number = 4.0
+  maxPayloadMb: number = 4.0,
+  timeoutMs: number = 35000
 ): Promise<AiApiResponse<T>> {
-  logger.info('aiApiHelper.callAiApi', `AI API 호출 시작: ${endpoint}`);
+  logger.info('aiApiHelper.callAiApi', `AI API 호출 시작: ${endpoint} (timeout: ${timeoutMs}ms)`);
 
   // 1. 요청 페이로드 크기 검증 (Vercel Serverless Function 4.5MB 제한 대비)
   const jsonString = JSON.stringify(payload);
@@ -44,7 +57,7 @@ export async function callAiApi<T = unknown>(
     throw new Error('사진 용량이 너무 큽니다. 더 작은 사진을 선택해주세요.');
   }
 
-  // 2. Fetch 실행 (최대 28초 제한시간 적용으로 무한 로딩 방지)
+  // 2. Fetch 실행 (지정된 타임아웃 제한시간 적용)
   let response: Response;
   try {
     response = await fetch(endpoint, {
@@ -53,7 +66,7 @@ export async function callAiApi<T = unknown>(
         'Content-Type': 'application/json',
       },
       body: jsonString,
-      signal: AbortSignal.timeout(28000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (netErr) {
     logger.error('aiApiHelper.callAiApi', `네트워크/타임아웃 오류: ${endpoint}`, netErr);

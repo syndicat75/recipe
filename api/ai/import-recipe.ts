@@ -40,7 +40,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       }
     }
 
-    const { url, text } = (body || {}) as { url?: string; text?: string };
+    const { url, text, requestId } = (body || {}) as {
+      url?: string;
+      text?: string;
+      requestId?: string;
+    };
 
     if (!url && !text) {
       res.status(400).json({
@@ -53,6 +57,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     const result = await importRecipeFromTextOrUrl({
       url,
       text,
+      requestId,
     });
 
     if (!result.success) {

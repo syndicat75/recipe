@@ -7,6 +7,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   X,
   Plus,
+  Minus,
   Save,
   Trash2,
   Image as ImageIcon,
@@ -69,6 +70,7 @@ export const RecipeFormModal: React.FC<RecipeFormModalProps> = ({
   const [method, setMethod] = useState('');
   const [cookingTime, setCookingTime] = useState<number>(15);
   const [difficulty, setDifficulty] = useState<'쉬움' | '보통' | '어려움'>('쉬움');
+  const [baseServings, setBaseServings] = useState<number>(1);
   const [caloriesPerServing, setCaloriesPerServing] = useState<string>('');
   const [isBookmarked, setIsBookmarked] = useState<boolean>(false);
   const [userNote, setUserNote] = useState<string>('');
@@ -84,7 +86,7 @@ export const RecipeFormModal: React.FC<RecipeFormModalProps> = ({
       document.body.style.overflow = 'hidden';
 
       if (recipeToEdit) {
-        logger.info('RecipeFormModal.useEffect', `수정 모드 초기화: ${recipeToEdit.name}`);
+        logger.info('RecipeFormModal.useEffect', `수정 모드 초기화: ${recipeToEdit.name} (기존 기준: ${recipeToEdit.baseServings}인분)`);
         setName(recipeToEdit.name);
         setCategory(recipeToEdit.category);
         setIcon(recipeToEdit.icon || '🍳');
@@ -93,6 +95,11 @@ export const RecipeFormModal: React.FC<RecipeFormModalProps> = ({
         setMethod(recipeToEdit.method === '-' ? '' : recipeToEdit.method || '');
         setCookingTime(recipeToEdit.cookingTimeMinutes || 15);
         setDifficulty(recipeToEdit.difficulty || '쉬움');
+        setBaseServings(
+          typeof recipeToEdit.baseServings === 'number' && recipeToEdit.baseServings >= 1
+            ? Math.round(recipeToEdit.baseServings)
+            : 1
+        );
         setCaloriesPerServing(
           recipeToEdit.caloriesPerServing && recipeToEdit.caloriesPerServing > 0
             ? String(recipeToEdit.caloriesPerServing)
@@ -102,7 +109,7 @@ export const RecipeFormModal: React.FC<RecipeFormModalProps> = ({
         setUserNote(initialUserNote || recipeToEdit.userNotes || '');
         setImageTab(recipeToEdit.imageUrl ? 'url' : 'emoji');
       } else {
-        logger.info('RecipeFormModal.useEffect', '신규 등록 모드 초기화');
+        logger.info('RecipeFormModal.useEffect', '신규 등록 모드 초기화 (기본 1인분)');
         setName('');
         setCategory('반찬');
         setIcon('🍳');
@@ -111,6 +118,8 @@ export const RecipeFormModal: React.FC<RecipeFormModalProps> = ({
         setMethod('');
         setCookingTime(15);
         setDifficulty('쉬움');
+        setBaseServings(1);
+        setCaloriesPerServing('');
         setIsBookmarked(initialBookmarked);
         setUserNote('');
         setImageTab('emoji');
@@ -220,6 +229,8 @@ export const RecipeFormModal: React.FC<RecipeFormModalProps> = ({
     const createdAt = isEditMode && recipeToEdit ? recipeToEdit.createdAt || Date.now() : Date.now();
     const targetScope: 'public' = 'public';
 
+    const normalizedServings = Math.max(1, Math.min(20, Math.round(Number(baseServings) || 1)));
+
     const parsedCalories = caloriesPerServing.trim() ? Number(caloriesPerServing) : undefined;
     const validCalories = parsedCalories && !isNaN(parsedCalories) && parsedCalories > 0 ? Math.round(parsedCalories) : undefined;
 
@@ -235,9 +246,20 @@ export const RecipeFormModal: React.FC<RecipeFormModalProps> = ({
       stepCount: stepLines.length,
       cookingTimeMinutes: Number(cookingTime) || 15,
       difficulty,
-      ...(validCalories ? { caloriesPerServing: validCalories } : (isEditMode && recipeToEdit?.caloriesPerServing ? { caloriesPerServing: recipeToEdit.caloriesPerServing } : {})),
-      ...(isEditMode && recipeToEdit?.totalCalories ? { totalCalories: recipeToEdit.totalCalories } : {}),
-      ...(isEditMode && recipeToEdit?.caloriesAnalyzedServings ? { caloriesAnalyzedServings: recipeToEdit.caloriesAnalyzedServings } : {}),
+      baseServings: normalizedServings,
+      ...(validCalories
+        ? {
+            caloriesPerServing: validCalories,
+            totalCalories: Math.round(validCalories * normalizedServings),
+            caloriesAnalyzedServings: normalizedServings,
+          }
+        : isEditMode && recipeToEdit?.caloriesPerServing
+          ? {
+              caloriesPerServing: recipeToEdit.caloriesPerServing,
+              totalCalories: Math.round(recipeToEdit.caloriesPerServing * normalizedServings),
+              caloriesAnalyzedServings: normalizedServings,
+            }
+          : {}),
       ...(isEditMode && recipeToEdit?.caloriesAnalyzedAt ? { caloriesAnalyzedAt: recipeToEdit.caloriesAnalyzedAt } : {}),
       ...(isEditMode && recipeToEdit?.caloriesConfidence ? { caloriesConfidence: recipeToEdit.caloriesConfidence } : {}),
       ...(isEditMode && recipeToEdit?.calorieBreakdown ? { calorieBreakdown: recipeToEdit.calorieBreakdown } : {}),
@@ -262,15 +284,15 @@ export const RecipeFormModal: React.FC<RecipeFormModalProps> = ({
 
         showToast(
           isEditMode
-            ? `✨ '${recipeData.name}' 레시피가 수정되었습니다.`
-            : `🎉 '${recipeData.name}' 레시피가 공개 DB에 등록되었습니다!`,
+            ? `✨ '${recipeData.name}' 레시피가 수정되었습니다. (기준: ${normalizedServings}인분)`
+            : `🎉 '${recipeData.name}' 레시피가 공개 DB에 등록되었습니다! (기준: ${normalizedServings}인분)`,
           'success'
         );
       } else {
         showToast(
           isEditMode
-            ? `✨ '${recipeData.name}' 레시피가 수정되었습니다.`
-            : `🎉 '${recipeData.name}' 레시피가 등록되었습니다!`,
+            ? `✨ '${recipeData.name}' 레시피가 수정되었습니다. (기준: ${normalizedServings}인분)`
+            : `🎉 '${recipeData.name}' 레시피가 등록되었습니다! (기준: ${normalizedServings}인분)`,
           'success'
         );
       }
@@ -501,8 +523,54 @@ export const RecipeFormModal: React.FC<RecipeFormModalProps> = ({
             )}
           </div>
 
-          {/* Cooking Time, Difficulty & Bookmark Option */}
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          {/* Base Servings, Cooking Time, Difficulty, Calories & Bookmark Option */}
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+            {/* 기준 인분 */}
+            <div>
+              <label className="block text-xs font-bold text-stone-700">
+                기준 인분 <span className="text-orange-500">*</span>
+              </label>
+              <div className="mt-1.5 flex items-center justify-between rounded-xl border border-orange-200 bg-[#fffdfa] px-2 py-1 focus-within:border-orange-400 focus-within:ring-2 focus-within:ring-orange-100">
+                <button
+                  type="button"
+                  onClick={() => setBaseServings((prev) => Math.max(1, prev - 1))}
+                  disabled={baseServings <= 1}
+                  className="flex h-7 w-7 items-center justify-center rounded-lg bg-orange-100 text-orange-700 transition hover:bg-orange-200 active:scale-95 disabled:opacity-30 disabled:pointer-events-none"
+                  aria-label="기준 인분 1 감소"
+                >
+                  <Minus className="h-3.5 w-3.5" />
+                </button>
+                <div className="flex items-center justify-center gap-0.5 font-bold text-stone-800 text-sm">
+                  <input
+                    type="number"
+                    min={1}
+                    max={20}
+                    value={baseServings}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value, 10);
+                      if (isNaN(val)) {
+                        setBaseServings(1);
+                      } else {
+                        setBaseServings(Math.max(1, Math.min(20, val)));
+                      }
+                    }}
+                    className="w-8 text-center font-black text-stone-900 bg-transparent outline-none"
+                  />
+                  <span className="text-xs font-medium text-stone-500">인분</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setBaseServings((prev) => Math.min(20, prev + 1))}
+                  disabled={baseServings >= 20}
+                  className="flex h-7 w-7 items-center justify-center rounded-lg bg-orange-100 text-orange-700 transition hover:bg-orange-200 active:scale-95 disabled:opacity-30 disabled:pointer-events-none"
+                  aria-label="기준 인분 1 증가"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </div>
+
+            {/* 소요 시간 */}
             <div>
               <label className="block text-xs font-bold text-stone-700">소요 시간 (분)</label>
               <input
@@ -515,6 +583,7 @@ export const RecipeFormModal: React.FC<RecipeFormModalProps> = ({
               />
             </div>
 
+            {/* 난이도 */}
             <div>
               <label className="block text-xs font-bold text-stone-700">난이도</label>
               <select
@@ -528,6 +597,7 @@ export const RecipeFormModal: React.FC<RecipeFormModalProps> = ({
               </select>
             </div>
 
+            {/* 1인분 칼로리 */}
             <div>
               <label className="block text-xs font-bold text-stone-700">1인분 칼로리 (kcal)</label>
               <input
@@ -541,6 +611,7 @@ export const RecipeFormModal: React.FC<RecipeFormModalProps> = ({
               />
             </div>
 
+            {/* 즐겨찾기 */}
             <div className="flex flex-col justify-end">
               <label className="flex items-center gap-2 cursor-pointer rounded-xl border border-orange-200 bg-[#fffdfa] p-2.5 transition hover:bg-orange-50">
                 <input

@@ -40,9 +40,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       }
     }
 
-    const { imageBase64, mimeType } = (body || {}) as {
+    const { imageBase64, mimeType, requestId } = (body || {}) as {
       imageBase64?: string;
       mimeType?: string;
+      requestId?: string;
     };
 
     if (!imageBase64 || !imageBase64.trim()) {
@@ -56,6 +57,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     const result = await importRecipeFromImage({
       imageBase64,
       mimeType,
+      requestId,
     });
 
     if (!result.success) {

@@ -60,7 +60,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       name,
       category,
       ingredients,
-      baseServings: Number(baseServings) || 2,
+      baseServings: Number(baseServings) >= 1 ? Number(baseServings) : 1,
     });
 
     if (!result.success) {
