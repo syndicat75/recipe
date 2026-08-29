@@ -40,10 +40,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       }
     }
 
-    const { url, text, requestId } = (body || {}) as {
+    const { url, text, requestId, availableCategories } = (body || {}) as {
       url?: string;
       text?: string;
       requestId?: string;
+      availableCategories?: string[];
     };
 
     if (!url && !text) {
@@ -58,6 +59,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       url,
       text,
       requestId,
+      availableCategories,
     });
 
     if (!result.success) {

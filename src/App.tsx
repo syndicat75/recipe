@@ -28,6 +28,7 @@ import { useShoppingList } from './hooks/useShoppingList';
 import { useMealPlan } from './hooks/useMealPlan';
 import { useRecipeFilter } from './hooks/useRecipeFilter';
 import { useRecipeMigration } from './hooks/useRecipeMigration';
+import { useRecipeCategories } from './hooks/useRecipeCategories';
 
 // Sub Components
 import { Header } from './components/Header';
@@ -54,6 +55,7 @@ import { FamilyShareModal } from './components/FamilyShareModal';
 import { CloudMigrationModal } from './components/CloudMigrationModal';
 import { PwaInstallModal } from './components/PwaInstallModal';
 import { AdminCalorieModal } from './components/AdminCalorieModal';
+import { AdminCategoryModal } from './components/AdminCategoryModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
 
 /**
@@ -151,7 +153,18 @@ export default function App(): React.JSX.Element {
     addRecipeToMealPlan: handleAddRecipeToMealPlan,
   } = useMealPlan({ showToast });
 
-  // 10. Recipe Filtering, Search & Sorting Hook
+  // 10. Dynamic Category Management Hook (Firestore 실시간 동기화 & 단일 진실 공급원)
+  const {
+    categories,
+    isLoading: isLoadingCategories,
+    addCategory,
+    updateCategory,
+    deleteCategory,
+    reorderCategories,
+    toggleCategoryActive,
+  } = useRecipeCategories({ isAdmin, showToast });
+
+  // 11. Recipe Filtering, Search & Sorting Hook
   const {
     activeCategory,
     setActiveCategory,
@@ -165,9 +178,10 @@ export default function App(): React.JSX.Element {
     recipes,
     bookmarkedIds,
     userNotes,
+    categories,
   });
 
-  // 11. Family Sync Hook (Firestore 다기기 실시간 공유)
+  // 12. Family Sync Hook (Firestore 다기기 실시간 공유)
   const {
     familyProfile,
     activeFamily,
@@ -196,7 +210,7 @@ export default function App(): React.JSX.Element {
     updateProfile: updateFamilyUserProfile,
   } = useFamilySync(user);
 
-  // 12. Modal & Active UI States
+  // 13. Modal & Active UI States
   const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(null);
   const [cookingModeRecipe, setCookingModeRecipe] = useState<Recipe | null>(null);
   const [cookingMultiplier, setCookingMultiplier] = useState<number>(1);
@@ -209,6 +223,7 @@ export default function App(): React.JSX.Element {
   const [isTodayMenuModalOpen, setIsTodayMenuModalOpen] = useState<boolean>(false);
   const [isFamilyShareModalOpen, setIsFamilyShareModalOpen] = useState<boolean>(false);
   const [isAdminCalorieModalOpen, setIsAdminCalorieModalOpen] = useState<boolean>(false);
+  const [isCategoryManagerOpen, setIsCategoryManagerOpen] = useState<boolean>(false);
   const [aiChefRecipe, setAiChefRecipe] = useState<Recipe | null>(null);
 
   // 13. Confirm Dialog State
@@ -551,6 +566,7 @@ export default function App(): React.JSX.Element {
         onOpenCloudSyncModal={handleManualOpenCloudSyncModal}
         onRestoreDefaultRecipes={handleRestoreDefaultRecipes}
         onOpenAdminCalories={() => setIsAdminCalorieModalOpen(true)}
+        onOpenCategoryManager={() => setIsCategoryManagerOpen(true)}
       />
 
       {/* Main Content Areas based on Routing */}
@@ -594,7 +610,7 @@ export default function App(): React.JSX.Element {
           {/* Hero Section */}
           <HeroSection
             totalRecipeCount={recipes.length}
-            categoryCount={CATEGORY_LIST.length}
+            categoryCount={categories.filter((c) => c.isActive).length}
             bookmarkCount={bookmarkedIds.length}
             onSelectCategory={setActiveCategory}
             onScrollToRecipes={() => {
@@ -618,6 +634,7 @@ export default function App(): React.JSX.Element {
                 activeCategory={activeCategory}
                 onCategoryChange={setActiveCategory}
                 categoryCounts={categoryCounts}
+                categories={categories}
                 totalCount={recipes.length}
                 bookmarkCount={bookmarkedIds.length}
               />
@@ -780,6 +797,7 @@ export default function App(): React.JSX.Element {
           onDeleteRecipe={handleDeleteRecipeRequest}
           showToast={showToast}
           isAdmin={isAdmin}
+          categories={categories}
         />
       )}
 
@@ -819,6 +837,22 @@ export default function App(): React.JSX.Element {
         />
       )}
 
+      {/* Dynamic Category Management Modal - 관리자 전용 */}
+      {isAdmin && (
+        <AdminCategoryModal
+          isOpen={isCategoryManagerOpen}
+          onClose={() => setIsCategoryManagerOpen(false)}
+          categories={categories}
+          recipes={recipes}
+          onAddCategory={addCategory}
+          onUpdateCategory={updateCategory}
+          onDeleteCategory={deleteCategory}
+          onReorderCategories={reorderCategories}
+          onToggleActive={toggleCategoryActive}
+          showToast={showToast}
+        />
+      )}
+
       {/* AI Recipe Import Modal - 관리자 전용 */}
       <ImportRecipeModal
         isOpen={isImportModalOpen}
@@ -832,6 +866,7 @@ export default function App(): React.JSX.Element {
         }}
         showToast={showToast}
         isAdmin={isAdmin}
+        categories={categories}
       />
 
       {/* Today Menu Recommendation & Roulette Modal */}

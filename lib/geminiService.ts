@@ -43,10 +43,10 @@ export function getGeminiClient(): GoogleGenAI {
 }
 
 /**
- * Gemini 3.7 Flash 모델 과부하(503/UNAVAILABLE/High demand/429) 발생 시
- * 지수 백오프(Exponential Backoff + Jitter)로 재시도하고,
- * 지속 실패 시 gemini-3.6-flash로 자동 Fallback하는 공통 호출 함수.
- * retryMode가 'fast'인 경우(레시피 가져오기 전용) 최대 1회 빠른 재시도 후 즉시 fallback하여 시간 초과를 방지합니다.
+ * Gemini 모델 과부하(503/UNAVAILABLE) 및 쿼터 소진(RESOURCE_EXHAUSTED/429)에 대응하는
+ * 고속 다단계 Fallback 체인 (Primary: gemini-3.7-flash -> Fallback 1: gemini-flash-latest -> Fallback 2: gemini-3.1-flash-lite)
+ * - 쿼터 초과나 429 감지 시 동일 모델에 대한 무의미한 지연 대기를 즉시 중단하고 다음 모델로 전환합니다.
+ * - retryMode가 'fast'인 경우 전체 10초 예산 내에서 신속하게 결과를 확보하여 클라이언트 타임아웃을 원천 차단합니다.
  */
 async function generateWithFallback(
   ai: GoogleGenAI,
@@ -54,19 +54,21 @@ async function generateWithFallback(
   options: GenerateFallbackOptions = {}
 ): Promise<GenerateContentResult & { executionMeta?: ModelExecutionMeta }> {
   const primaryModel = 'gemini-3.7-flash';
-  const fallbackModel = 'gemini-3.6-flash';
+  const fallbackModels = ['gemini-flash-latest', 'gemini-3.1-flash-lite'];
   const retryMode = options.retryMode || 'standard';
   const startedAt = options.startedAt || Date.now();
   const callStart = Date.now();
   const reqTag = options.requestId ? `[${options.requestId}] ` : '';
 
   const isFast = retryMode === 'fast';
-  const maxAttempts = isFast ? 2 : 3;
-  const delays = isFast ? [800] : [1000, 2000];
+  // fast 모드(레시피 추출)에서는 1회만 시도 후 실패 시 즉시 fallback
+  const maxAttempts = isFast ? 1 : 2;
+  const delays = [600];
 
   let retryCount = 0;
-  let fallbackNeeded = false;
+  let lastError: unknown = null;
 
+  // 1. Primary 모델 시도 (gemini-3.7-flash)
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
       const res = await ai.models.generateContent({
@@ -83,42 +85,48 @@ async function generateWithFallback(
         },
       });
     } catch (error) {
+      lastError = error;
       retryCount = attempt + 1;
       const message = error instanceof Error ? error.message : String(error);
-      const isRetryable =
-        message.includes('503') ||
-        message.includes('UNAVAILABLE') ||
-        message.includes('high demand') ||
-        message.includes('overloaded') ||
-        message.includes('RESOURCE_EXHAUSTED') ||
-        message.includes('429');
 
-      // 400, 401, 403, 404 등 클라이언트/인증 오류는 재시도 없이 즉시 throw
-      if (!isRetryable) {
+      // 400, 401, 403, 404 등 클라이언트/인증 오류는 즉시 throw
+      const isClientOrAuthError =
+        message.includes('400') ||
+        message.includes('401') ||
+        message.includes('403') ||
+        message.includes('404') ||
+        message.includes('API_KEY_INVALID');
+      if (isClientOrAuthError) {
         throw error;
       }
 
+      // 할당량 초과(RESOURCE_EXHAUSTED / 429)는 동일 모델 재시도 없이 즉시 Fallback으로 스위칭
+      const isQuotaOrRateLimit =
+        message.includes('RESOURCE_EXHAUSTED') ||
+        message.includes('429') ||
+        message.includes('quota') ||
+        message.includes('Quota exceeded');
+      if (isQuotaOrRateLimit) {
+        console.warn(`${reqTag}Gemini 3.7 Flash 할당량 초과 감지 - 동일 모델 재시도 생략 후 즉시 Fallback 체인 가동`);
+        break;
+      }
+
       const elapsed = Date.now() - startedAt;
-      // 전체 시간 예산 초과 감지: 이미 20초 이상 지났으면 추가 재시도 없이 즉시 Fallback
-      if (isFast && elapsed > 20000) {
-        console.warn(`${reqTag}Gemini 3.7 Fast Mode - 경과 시간(${elapsed}ms) 초과로 추가 재시도 생략 후 즉시 3.6 Fallback 전환`);
-        fallbackNeeded = true;
+      if (isFast && elapsed > 8000) {
+        console.warn(`${reqTag}Gemini 3.7 Fast Mode - 경과 시간(${elapsed}ms) 초과로 즉시 Fallback 전환`);
         break;
       }
 
       if (attempt < maxAttempts - 1) {
-        const jitter = Math.floor(Math.random() * 300);
-        const delay = (delays[attempt] || 800) + jitter;
+        const delay = (delays[attempt] || 600) + Math.floor(Math.random() * 200);
         console.warn(`${reqTag}Gemini 3.7 Flash 일시 과부하 - ${delay}ms 후 재시도 (${attempt + 1}/${maxAttempts - 1})`);
         await new Promise((resolve) => setTimeout(resolve, delay));
-      } else {
-        console.warn(`${reqTag}Gemini 3.7 Flash 재시도 한도 도달 - Gemini 3.6 Flash Fallback 실행`);
-        fallbackNeeded = true;
       }
     }
   }
 
-  if (fallbackNeeded) {
+  // 2. 다단계 Fallback 체인 순차 실행
+  for (const fallbackModel of fallbackModels) {
     console.info(`${reqTag}Falling back to ${fallbackModel}`);
     try {
       const fallbackRes = await ai.models.generateContent({
@@ -135,12 +143,13 @@ async function generateWithFallback(
         },
       });
     } catch (fallbackError) {
-      console.error(`${reqTag}Falling back to ${fallbackModel} failed:`, fallbackError);
-      throw fallbackError;
+      lastError = fallbackError;
+      console.warn(`${reqTag}Fallback to ${fallbackModel} failed:`, fallbackError);
+      // 다음 fallback 모델로 계속 진행
     }
   }
 
-  throw new Error('AI 모델 호출 실패');
+  throw lastError || new Error('모든 AI 모델 호출에 실패했습니다.');
 }
 
 /**
@@ -155,7 +164,7 @@ function cleanHtmlText(html: string): string {
     .replace(/<[^>]+>/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
-    .slice(0, 15000);
+    .slice(0, 4000);
 }
 
 /**
@@ -178,7 +187,7 @@ function safeParseGeminiJson<T>(rawText: string | undefined): T {
 
 /**
  * 오류 발생 시 사용자 친화적인 에러 메시지 객체를 반환합니다.
- * 503/과부하/429 오류는 사용자에게 친절한 안내를 제공하고 원시 에러는 details에만 보관합니다.
+ * 503/과부하/429/RESOURCE_EXHAUSTED 오류는 사용자에게 친절하고 명확한 안내를 제공합니다.
  */
 function formatAiServiceError(
   error: unknown,
@@ -191,17 +200,32 @@ function formatAiServiceError(
   }
 
   const errString = error instanceof Error ? error.message : String(error);
+
+  // 할당량(Quota) 초과 시 명확하고 친절한 안내
+  const isQuotaExceeded =
+    errString.includes('RESOURCE_EXHAUSTED') ||
+    errString.includes('quota') ||
+    errString.includes('Quota exceeded') ||
+    errString.includes('rate-limits');
+
+  if (isQuotaExceeded) {
+    return {
+      error:
+        'AI 서비스 일일 이용량(할당량)이 일시적으로 초과되었습니다. 잠시 후 다시 시도하시거나, 레시피 텍스트를 복사하여 "텍스트 가져오기" 또는 직접 등록을 이용해주세요.',
+      details: errString,
+    };
+  }
+
   const isOverloadedOrRateLimited =
     errString.includes('503') ||
     errString.includes('UNAVAILABLE') ||
     errString.includes('high demand') ||
     errString.includes('overloaded') ||
-    errString.includes('RESOURCE_EXHAUSTED') ||
     errString.includes('429');
 
   if (isOverloadedOrRateLimited) {
     return {
-      error: '현재 AI 서버 이용량이 많습니다. 잠시 후 다시 시도해주세요.',
+      error: '현재 AI 서버 이용량이 많아 일시적으로 지연되었습니다. 잠시 후 다시 시도해주세요.',
       details: errString,
     };
   }
@@ -223,6 +247,7 @@ export async function importRecipeFromTextOrUrl(params: {
   url?: string;
   text?: string;
   requestId?: string;
+  availableCategories?: string[];
 }): Promise<{
   success: boolean;
   data?: Record<string, unknown>;
@@ -246,13 +271,19 @@ export async function importRecipeFromTextOrUrl(params: {
     (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `req_${Date.now()}`);
 
   try {
-    const { url, text } = params;
+    const { url, text, availableCategories = [] } = params;
     if (!url && !text) {
       return {
         success: false,
         error: 'URL 또는 텍스트 중 하나를 입력해주세요.',
       };
     }
+
+    const validCategoryList =
+      Array.isArray(availableCategories) && availableCategories.length > 0
+        ? Array.from(new Set([...availableCategories, '기타']))
+        : ['반찬', '소스·양념', '국·찌개', '중식·양식', '밥·한그릇', '계란요리', '기타'];
+    const categoryOptionsText = validCategoryList.map((c) => `'${c}'`).join(', ');
 
     const ai = getGeminiClient();
     let sourceType: 'jsonld' | 'html' | 'text' = 'text';
@@ -261,9 +292,9 @@ export async function importRecipeFromTextOrUrl(params: {
     let sourceContent = '';
     let hintServings: number | undefined;
 
-    // 1. URL 제공된 경우: 6초 타임아웃 웹페이지 조회 및 JSON-LD 우선 파싱
+    // 1. URL 제공된 경우: 5초 타임아웃 웹페이지 조회 및 JSON-LD 우선 파싱
     if (url && url.trim()) {
-      const parseResult = await fetchAndParseRecipePage(url.trim(), 6000);
+      const parseResult = await fetchAndParseRecipePage(url.trim(), 5000);
       fetchDurationMs = parseResult.fetchDurationMs;
       parseDurationMs = parseResult.parseDurationMs;
 
@@ -314,7 +345,7 @@ ${sourceContent}
 
 [작성 규칙 - 엄격 준수]:
 1. name: 한국어 표준 음식명 (예: 김치찌개, 소고기 미역국, 계란말이 등)
-2. category: 반드시 다음 7개 중 하나만 선택: '반찬', '소스·양념', '국·찌개', '중식·양식', '밥·한그릇', '계란요리', '기타'
+2. category: 반드시 다음 카테고리 중 하나만 선택: ${categoryOptionsText} (가장 잘 어울리는 항목이 없으면 반드시 '기타' 선택)
 3. icon: 해당 요리와 가장 잘 어울리는 대표 단일 이모지 (예: 🍳, 🥘, 🥗, 🥣, 🍽️, 🍛, 🍚, 🥪, 🍜, 🥩 등)
 4. baseServings: 기준 인분 수 (원문이나 구조화 데이터에 명시된 인분을 최우선으로 추출하세요. 1인분이면 반드시 1, 2인분이면 2, 4인분이면 4. 원문에 1인분이 적혀 있으면 절대로 2로 바꾸지 마세요. 원문에 인분 정보가 전혀 없을 때만 기본값 1을 지정하세요)
 5. ingredients: 재료 및 분량을 줄바꿈(\\n)으로 구분된 하나의 문자열로 작성
@@ -359,6 +390,13 @@ ${sourceContent}
 
     const parsedJson = safeParseGeminiJson<Record<string, unknown>>(response.text);
 
+    // category 검증: 허용된 카테고리에 없으면 '기타'로 안전 fallback
+    let finalCategory = typeof parsedJson.category === 'string' ? parsedJson.category.trim() : '기타';
+    if (!validCategoryList.includes(finalCategory)) {
+      console.warn(`[recipe-import][${reqId}] 인식된 카테고리 "${finalCategory}"가 허용 목록에 없어 "기타"로 대체`);
+      finalCategory = '기타';
+    }
+
     // baseServings 검증: JSON-LD 명시값 또는 Gemini 추출값 우선, 없으면 1
     const rawServings = parsedJson.baseServings;
     const finalServings =
@@ -382,6 +420,7 @@ ${sourceContent}
       success: true,
       data: {
         ...parsedJson,
+        category: finalCategory,
         baseServings: finalServings,
       },
       meta: {
@@ -419,6 +458,7 @@ export async function importRecipeFromImage(params: {
   imageBase64?: string;
   mimeType?: string;
   requestId?: string;
+  availableCategories?: string[];
 }): Promise<{
   success: boolean;
   recipe?: Record<string, unknown>;
@@ -440,7 +480,7 @@ export async function importRecipeFromImage(params: {
     (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `req_${Date.now()}`);
 
   try {
-    const { imageBase64, mimeType = 'image/jpeg' } = params;
+    const { imageBase64, mimeType = 'image/jpeg', availableCategories = [] } = params;
 
     if (!imageBase64 || !imageBase64.trim()) {
       return {
@@ -448,6 +488,12 @@ export async function importRecipeFromImage(params: {
         error: '이미지 데이터가 필요합니다.',
       };
     }
+
+    const validCategoryList =
+      Array.isArray(availableCategories) && availableCategories.length > 0
+        ? Array.from(new Set([...availableCategories, '기타']))
+        : ['반찬', '소스·양념', '국·찌개', '중식·양식', '밥·한그릇', '계란요리', '기타'];
+    const categoryOptionsText = validCategoryList.map((c) => `'${c}'`).join(', ');
 
     const ai = getGeminiClient();
 
@@ -462,7 +508,7 @@ export async function importRecipeFromImage(params: {
 2. 사진에 실제 레시피(재료나 조리법) 텍스트가 전혀 없고 단순 완성 음식 사진이거나 무관한 이미지인 경우, isRecipeFound를 false로 하고 errorMessage에 "사진에서 재료나 조리방법이 적힌 레시피 정보를 확인할 수 없습니다."를 반환하세요.
 3. 사진에 '간장'이라고만 적혀 있으면 '간장'으로만 추출하세요. 임의로 '간장 1큰술'로 추측해서 채우지 마세요.
 4. 글씨가 흐리거나 잘 보이지 않는 부분은 글자 뒤에 '(확인 필요)' 또는 '?'를 붙이고, lowConfidenceFields 배열에 해당 필드명(예: 'ingredients', 'cookingTimeMinutes' 등)을 추가하세요.
-5. 카테고리는 다음 7개 중 가장 적절한 1개를 선택하세요: '반찬', '소스·양념', '국·찌개', '중식·양식', '밥·한그릇', '계란요리', '기타'
+5. 카테고리는 다음 항목 중 가장 적절한 1개를 선택하세요: ${categoryOptionsText} (어울리는 항목이 없으면 반드시 '기타' 선택)
 6. 기준 인분 정보가 사진에 명시되어 있다면 baseServings(숫자)로 추출하고, 없으면 1로 지정하세요.
 7. 재료(ingredients)는 줄바꿈(\\n)으로 구분된 하나의 문자열로 작성하세요. (예: "돼지고기 150g\\n신김치 1/4포기\\n두부 1/2모")
 8. 조리법(method)은 각 단계를 번호와 줄바꿈(\\n)으로 구분하여 작성하세요.`;
@@ -565,11 +611,14 @@ export async function importRecipeFromImage(params: {
       `[recipe-import-image][${reqId}] Gemini ${modelUsed}: ${aiDurationMs}ms (retry: ${retryCount}, fallback: ${fallbackUsed}), Total: ${totalDurationMs}ms`
     );
 
+    const rawCategory = typeof parsedData.category === 'string' ? parsedData.category.trim() : '기타';
+    const finalCategory = validCategoryList.includes(rawCategory) ? rawCategory : '기타';
+
     return {
       success: true,
       recipe: {
         name: parsedData.name || '가져온 레시피',
-        category: parsedData.category || '기타',
+        category: finalCategory,
         icon: parsedData.icon || '🍳',
         baseServings:
           typeof parsedData.baseServings === 'number' && parsedData.baseServings >= 1

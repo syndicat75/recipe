@@ -5,7 +5,7 @@
  */
 
 import React, { useState, useRef } from 'react';
-import { Wrench, ChevronDown, Download, Timer, Database, RotateCcw, Flame } from 'lucide-react';
+import { Wrench, ChevronDown, Download, Timer, Database, RotateCcw, Flame, FolderKanban } from 'lucide-react';
 import { useClickOutside } from '../../hooks/useClickOutside';
 import { logger } from '../../utils/logger';
 
@@ -22,6 +22,8 @@ export interface ToolsMenuProps {
   onToggleTimer: () => void;
   /** 관리자 권한 여부 */
   isAdmin?: boolean;
+  /** 카테고리 관리 모달 열기 핸들러 (관리자 전용) */
+  onOpenCategoryManager?: () => void;
   /** 백업/복원 모달 열기 핸들러 (관리자 전용) */
   onOpenBackupRestore?: () => void;
   /** 기본 시드 레시피 복구 핸들러 (관리자 전용) */
@@ -40,6 +42,7 @@ export const ToolsMenu: React.FC<ToolsMenuProps> = ({
   isTimerOpen,
   onToggleTimer,
   isAdmin = false,
+  onOpenCategoryManager,
   onOpenBackupRestore,
   onRestoreDefaultRecipes,
   onOpenAdminCalories,
@@ -156,8 +159,29 @@ export const ToolsMenu: React.FC<ToolsMenuProps> = ({
             </button>
 
             {/* 관리자 전용 기능 구분선 */}
-            {isAdmin && (onOpenBackupRestore || onRestoreDefaultRecipes || onOpenAdminCalories) && (
+            {isAdmin && (onOpenCategoryManager || onOpenBackupRestore || onRestoreDefaultRecipes || onOpenAdminCalories) && (
               <div className="my-1 border-t border-stone-100 pt-1" />
+            )}
+
+            {/* 🗂 카테고리 관리 (관리자 전용) */}
+            {isAdmin && onOpenCategoryManager && (
+              <button
+                type="button"
+                onClick={() => {
+                  logger.info('ToolsMenu', '카테고리 관리 항목 클릭');
+                  setIsOpen(false);
+                  onOpenCategoryManager();
+                }}
+                className="w-full flex items-center justify-between rounded-xl px-2.5 py-2 text-xs font-semibold text-stone-700 hover:bg-orange-50 hover:text-orange-900 transition text-left"
+              >
+                <div className="flex items-center gap-2">
+                  <FolderKanban className="h-4 w-4 text-orange-500" />
+                  <span>카테고리 관리</span>
+                </div>
+                <span className="text-[10px] font-bold text-orange-700 bg-orange-50 border border-orange-200 px-1.5 py-0.5 rounded-md">
+                  관리자
+                </span>
+              </button>
             )}
 
             {/* 🔥 칼로리 일괄 분석 (관리자 전용) */}

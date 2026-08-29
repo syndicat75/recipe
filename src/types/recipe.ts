@@ -4,9 +4,29 @@
  */
 
 /**
- * 레시피 카테고리 유니온 타입
+ * 레시피 카테고리 타입 (동적 카테고리 지원을 위한 string 타입)
  */
-export type RecipeCategory = '반찬' | '소스·양념' | '국·찌개' | '중식·양식' | '밥·한그릇' | '계란요리' | '기타';
+export type RecipeCategory = string;
+
+/**
+ * Firestore /recipeCategories 컬렉션 문서 구조
+ */
+export interface RecipeCategoryDoc {
+  /** 카테고리 고유 ID (예: side-dish, soup-stew 등) */
+  id: string;
+  /** 카테고리 표시명 (예: 반찬, 국·찌개, 면·국수 등) */
+  name: string;
+  /** 카테고리 대표 이모지 아이콘 (선택) */
+  icon?: string;
+  /** 카테고리 정렬 순서 (오름차순) */
+  order: number;
+  /** 카테고리 활성화 여부 (비활성 시 필터 및 신규 등록 목록에서 숨김) */
+  isActive: boolean;
+  /** 생성 일시 (타임스탬프) */
+  createdAt: number;
+  /** 수정 일시 (타임스탬프) */
+  updatedAt: number;
+}
 
 /**
  * 카테고리 필터 옵션 (전체 및 즐겨찾기 포함)

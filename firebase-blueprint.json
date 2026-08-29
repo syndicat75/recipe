@@ -49,12 +49,31 @@
         "notes": { "type": "object", "description": "Map of recipe ID to note string" },
         "updatedAt": { "type": "number", "description": "Last updated timestamp" }
       }
+    },
+    "RecipeCategory": {
+      "title": "RecipeCategory",
+      "description": "A dynamic recipe category definition",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique category slug or ID" },
+        "name": { "type": "string", "description": "Category display name" },
+        "icon": { "type": "string", "description": "Category emoji icon" },
+        "order": { "type": "number", "description": "Display sort order" },
+        "isActive": { "type": "boolean", "description": "Active visibility flag" },
+        "createdAt": { "type": "number", "description": "Creation timestamp" },
+        "updatedAt": { "type": "number", "description": "Last updated timestamp" }
+      },
+      "required": ["id", "name", "order", "isActive", "createdAt", "updatedAt"]
     }
   },
   "firestore": {
     "/recipes/{recipeId}": {
       "schema": "Recipe",
       "description": "Public recipes viewable by all users and editable by authenticated admin"
+    },
+    "/recipeCategories/{categoryId}": {
+      "schema": "RecipeCategory",
+      "description": "Dynamic recipe categories viewable by all users and editable by authenticated admin"
     },
     "/users/{userId}/recipes/{recipeId}": {
       "schema": "Recipe",

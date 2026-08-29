@@ -27,8 +27,8 @@ import {
   Plus,
   Minus,
 } from 'lucide-react';
-import { APP_CONFIG, CATEGORY_CONFIG, CATEGORY_LIST } from '../config/appConfig';
-import { Recipe, RecipeCategory, SaveRecipeResult } from '../types/recipe';
+import { APP_CONFIG, CATEGORY_CONFIG, DEFAULT_CATEGORY_DOCS, FALLBACK_CATEGORY } from '../config/appConfig';
+import { Recipe, RecipeCategory, RecipeCategoryDoc, SaveRecipeResult } from '../types/recipe';
 import { logger } from '../utils/logger';
 import { callAiApi } from '../utils/aiApiHelper';
 
@@ -56,6 +56,8 @@ interface ImportRecipeModalProps {
   showToast: (msg: string, type?: 'success' | 'info' | 'warning' | 'error') => void;
   /** 관리자 여부 */
   isAdmin?: boolean;
+  /** 동적 카테고리 목록 */
+  categories?: RecipeCategoryDoc[];
 }
 
 type ImportTab = 'url' | 'text' | 'image';
@@ -121,6 +123,7 @@ export const ImportRecipeModal: React.FC<ImportRecipeModalProps> = ({
   onOpenDirectRegister,
   showToast,
   isAdmin = false,
+  categories = DEFAULT_CATEGORY_DOCS,
 }) => {
   const [activeTab, setActiveTab] = useState<ImportTab>('url');
   const [urlInput, setUrlInput] = useState('');
@@ -164,7 +167,7 @@ export const ImportRecipeModal: React.FC<ImportRecipeModalProps> = ({
   // AI 분석 결과 검토 상태 (Step 2)
   const [parsedRecipe, setParsedRecipe] = useState<{
     name: string;
-    category: RecipeCategory;
+    category: string;
     icon: string;
     baseServings: number;
     ingredients: string;
@@ -246,7 +249,11 @@ export const ImportRecipeModal: React.FC<ImportRecipeModalProps> = ({
     try {
       let endpoint: string = APP_CONFIG.ai.importEndpoint;
       const clientReqId = `client_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-      let bodyData: Record<string, unknown> = { requestId: clientReqId };
+      const activeCategoryNames = categories.filter((c) => c.isActive).map((c) => c.name);
+      let bodyData: Record<string, unknown> = {
+        requestId: clientReqId,
+        availableCategories: activeCategoryNames,
+      };
 
       if (activeTab === 'url') {
         bodyData.url = targetUrl;
@@ -282,10 +289,12 @@ export const ImportRecipeModal: React.FC<ImportRecipeModalProps> = ({
 
       logger.info('ImportRecipeModal.handleAnalyze', `AI 분석 성공: ${resData.name}`);
 
-      // 유효 카테고리 매핑
-      let cat: RecipeCategory = '기타';
-      if (resData.category && (CATEGORY_LIST as readonly string[]).includes(resData.category)) {
-        cat = resData.category as RecipeCategory;
+      // 유효 카테고리 매핑 (활성화된 카테고리 우선, 전체 카테고리 보조, 실패 시 '기타')
+      let cat: string = FALLBACK_CATEGORY;
+      if (resData.category && activeCategoryNames.includes(resData.category)) {
+        cat = resData.category;
+      } else if (resData.category && categories.some((c) => c.name === resData.category)) {
+        cat = resData.category;
       }
 
       setParsedRecipe({
@@ -754,14 +763,22 @@ export const ImportRecipeModal: React.FC<ImportRecipeModalProps> = ({
                     <label className="block text-xs font-bold text-stone-700">카테고리</label>
                     <select
                       value={parsedRecipe.category}
-                      onChange={(e) => setParsedRecipe({ ...parsedRecipe, category: e.target.value as RecipeCategory })}
+                      onChange={(e) => setParsedRecipe({ ...parsedRecipe, category: e.target.value })}
                       className="w-full rounded-xl border border-stone-200 bg-stone-50/60 p-2.5 text-xs font-bold text-stone-900 focus:border-orange-500 focus:bg-white"
                     >
-                      {CATEGORY_LIST.map((c) => (
-                        <option key={c} value={c}>
-                          {c}
+                      {/* 현재 선택된 카테고리가 활성화 목록에 없으면 옵션에 유지 */}
+                      {parsedRecipe.category && !categories.some((c) => c.isActive && c.name === parsedRecipe.category) && (
+                        <option value={parsedRecipe.category}>
+                          ⚠️ {parsedRecipe.category} (현재 카테고리)
                         </option>
-                      ))}
+                      )}
+                      {categories
+                        .filter((c) => c.isActive)
+                        .map((c) => (
+                          <option key={c.id} value={c.name}>
+                            {c.icon ? `${c.icon} ` : ''}{c.name}
+                          </option>
+                        ))}
                     </select>
                   </div>
                 </div>

@@ -137,6 +137,14 @@ service cloud.firestore {
       // 수정/비활성화/삭제: 해당 가족 대표(owner)만 가능
       allow update, delete: if isSignedIn() && isFamilyOwner(resource.data.familyId);
     }
+
+    // 6. 카테고리 관리 컬렉션 (/recipeCategories/{categoryId})
+    // 조회: 누구나 가능 (비로그인, 로그인 모두)
+    // 등록/수정/삭제: 관리자(isAdmin())만 가능
+    match /recipeCategories/{categoryId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
   }
 }
 

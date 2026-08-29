@@ -3,7 +3,7 @@
  * @description 애플리케이션 전역 설정값, 카테고리 메타데이터, 로컬스토리지 키 및 기본값 정의
  */
 
-import { RecipeCategory } from '../types/recipe';
+import { RecipeCategory, RecipeCategoryDoc } from '../types/recipe';
 
 /**
  * 애플리케이션 기본 정보 설정
@@ -16,6 +16,8 @@ export const APP_CONFIG = {
   storageKeys: {
     /** 통합 레시피 목록 키 */
     allRecipes: 'my_recipe_all_recipes_v2',
+    /** 카테고리 오프라인/로딩 캐시 키 */
+    categoriesCache: 'my_recipe_categories_cache_v1',
     /** 이전 버전 호환용 커스텀 레시피 키 */
     customRecipesLegacy: 'my_recipe_custom_recipes_v1',
     bookmarks: 'my_recipe_bookmarks_v1',
@@ -134,9 +136,9 @@ export const CATEGORY_CONFIG: Record<
 };
 
 /**
- * 카테고리 전체 목록 배열
+ * 기본 표준 카테고리 목록 (기본 시드 및 레거시 호환용)
  */
-export const CATEGORY_LIST: RecipeCategory[] = [
+export const CATEGORY_LIST = [
   '반찬',
   '소스·양념',
   '국·찌개',
@@ -144,4 +146,54 @@ export const CATEGORY_LIST: RecipeCategory[] = [
   '밥·한그릇',
   '계란요리',
   '기타',
+] as const;
+
+/**
+ * 기본 제공 표준 카테고리 Firestore 초기 시드 문서 (최초 1회 생성용)
+ */
+export const DEFAULT_CATEGORY_DOCS: RecipeCategoryDoc[] = [
+  { id: 'side-dish', name: '반찬', icon: '🥗', order: 1, isActive: true, createdAt: 1700000000000, updatedAt: 1700000000000 },
+  { id: 'sauce-seasoning', name: '소스·양념', icon: '🥣', order: 2, isActive: true, createdAt: 1700000000000, updatedAt: 1700000000000 },
+  { id: 'soup-stew', name: '국·찌개', icon: '🥘', order: 3, isActive: true, createdAt: 1700000000000, updatedAt: 1700000000000 },
+  { id: 'chinese-western', name: '중식·양식', icon: '🍽️', order: 4, isActive: true, createdAt: 1700000000000, updatedAt: 1700000000000 },
+  { id: 'rice-bowl', name: '밥·한그릇', icon: '🍛', order: 5, isActive: true, createdAt: 1700000000000, updatedAt: 1700000000000 },
+  { id: 'egg-dish', name: '계란요리', icon: '🍳', order: 6, isActive: true, createdAt: 1700000000000, updatedAt: 1700000000000 },
+  { id: 'etc', name: '기타', icon: '🍴', order: 7, isActive: true, createdAt: 1700000000000, updatedAt: 1700000000000 },
 ];
+
+/** 기본 fallback 카테고리명 */
+export const FALLBACK_CATEGORY = '기타';
+
+/**
+ * 동적 카테고리 메타데이터(아이콘, 뱃지 색상 테마) 조회 헬퍼
+ * @param categoryName 카테고리명
+ * @param customCategories 현재 로드된 전체 카테고리 문서 목록 (선택)
+ */
+export function getCategoryMeta(
+  categoryName?: string,
+  customCategories?: RecipeCategoryDoc[]
+): { label: string; icon: string; bgClass: string; textClass: string; badgeClass: string } {
+  const name = categoryName?.trim() || FALLBACK_CATEGORY;
+
+  // 1. 기존 표준 설정에 매칭되는 경우
+  if (CATEGORY_CONFIG[name]) {
+    const base = CATEGORY_CONFIG[name];
+    const customMatch = customCategories?.find((c) => c.name.trim() === name);
+    return {
+      ...base,
+      icon: customMatch?.icon || base.icon,
+    };
+  }
+
+  // 2. 동적 카테고리 목록에서 검색
+  const dynamicMatch = customCategories?.find((c) => c.name.trim() === name);
+  const icon = dynamicMatch?.icon || '🍴';
+
+  return {
+    label: name,
+    icon: icon,
+    bgClass: 'bg-orange-50',
+    textClass: 'text-orange-800',
+    badgeClass: 'bg-orange-100 text-orange-800',
+  };
+}

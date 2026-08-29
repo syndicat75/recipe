@@ -401,9 +401,9 @@ export function formatJsonLdPromptText(recipe: ParsedJsonLdRecipe, sourceUrl: st
 }
 
 /**
- * HTML 문서에서 레시피와 무관한 잡음(헤더, 푸터, 네비게이션, 광고, 스크립트, 스타일 등)을 제거하고
- * 레시피 핵심 본문을 우선 추출하는 최적화 Fallback.
- * 토큰 소비를 대폭 줄이기 위해 최대 8,000~10,000자 이내로 정제합니다.
+ * HTML 문서에서 레시피와 무관한 잡음(헤더, 푸터, 네비게이션, 광고, 댓글, 스크립트 등)을 제거하고
+ * 레시피 핵심 본문을 우선 추출하는 고속 경량 파서.
+ * 토큰 소비를 대폭 줄이고 Gemini 응답 속도를 2~3배 끌어올리기 위해 최대 3,500자 이내로 엄선 정제합니다.
  */
 export function cleanHtmlFallback(html: string): string {
   // 1. 불필요한 태그 영역 완전히 제거
@@ -417,18 +417,22 @@ export function cleanHtmlFallback(html: string): string {
     .replace(/<noscript\b[^<]*(?:(?!<\/noscript>)<[^<]*)*<\/noscript>/gi, '')
     .replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, '')
     .replace(/<svg\b[^<]*(?:(?!<\/svg>)<[^<]*)*<\/svg>/gi, '')
+    .replace(/<form\b[^<]*(?:(?!<\/form>)<[^<]*)*<\/form>/gi, '')
     .replace(/<!--[\s\S]*?-->/g, '');
 
-  // 2. 레시피 관련 유력 컨테이너(만개의레시피, 블로그, 요리사이트) 탐색
-  // 예: id나 class에 recipe, ingredient, 재료, 조리, step, view2_summary 등이 포함된 블록
+  // 2. 레시피 핵심 유력 컨테이너 (네이버 스마트에디터, 만개의레시피, 블로그, 요리사이트) 정밀 탐색
+  // - se-main-container / se-component (네이버 블로그)
+  // - view2_summary / ready_ingre3 / view_step (만개의레시피)
+  // - entry-content / article_content (티스토리/다음)
+  // - recipe, ingredient, cook, step, method, 재료, 만드는법 등
   const candidateRegex =
-    /<(?:div|section|article)\b[^>]*(?:class|id)=["'][^"']*(?:recipe|ingredient|view2|cook|step|method|재료|만드는법)[^"']*["'][^>]*>([\s\S]*?)<\/(?:div|section|article)>/gi;
+    /<(?:div|section|article|main)\b[^>]*(?:class|id)=["'][^"']*(?:recipe|ingredient|view2|cook|step|method|재료|만드는법|se-main-container|entry-content|view_step)[^"']*["'][^>]*>([\s\S]*?)<\/(?:div|section|article|main)>/gi;
 
   const candidateBlocks: string[] = [];
   let candidateMatch: RegExpExecArray | null;
   while ((candidateMatch = candidateRegex.exec(text)) !== null) {
     const rawBlock = candidateMatch[1]?.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-    if (rawBlock && rawBlock.length >= 80) {
+    if (rawBlock && rawBlock.length >= 60) {
       candidateBlocks.push(rawBlock);
     }
     if (candidateBlocks.length >= 6) break;
@@ -436,33 +440,55 @@ export function cleanHtmlFallback(html: string): string {
 
   if (candidateBlocks.length > 0) {
     const combinedCandidates = candidateBlocks.join('\n\n');
-    if (combinedCandidates.length >= 250) {
-      return combinedCandidates.slice(0, 9000);
+    if (combinedCandidates.length >= 150) {
+      return combinedCandidates.slice(0, 3500);
     }
   }
 
-  // 3. 일반 태그 제거 및 텍스트 정규화
+  // 3. 일반 본문 태그 제거 및 공백 정규화
   text = text.replace(/<[^>]+>/g, ' ');
   text = text.replace(/\s+/g, ' ').trim();
 
-  // 4. 최대 9,000자로 제한하여 Gemini 전송 속도와 토큰 절약
-  return text.slice(0, 9000);
+  // 4. 최대 3,500자로 제한하여 Gemini 전송 속도와 토큰 소모 최소화
+  return text.slice(0, 3500);
 }
 
 /**
- * URL을 받아 6초 타임아웃 내에 안전하게 웹페이지를 조회하고
+ * 네이버 블로그 등 iframe을 사용하는 URL을 모바일 친화적 본문 직접 URL로 정규화
+ */
+export function normalizeRecipeRequestUrl(rawUrl: string): string {
+  try {
+    const parsed = new URL(rawUrl.trim());
+    const host = parsed.hostname.toLowerCase();
+
+    // blog.naver.com/{id}/{postId} -> m.blog.naver.com/{id}/{postId}
+    if (host === 'blog.naver.com' && !parsed.pathname.includes('PostView')) {
+      parsed.hostname = 'm.blog.naver.com';
+      return parsed.toString();
+    }
+  } catch {
+    // 무시하고 원본 유지
+  }
+  return rawUrl.trim();
+}
+
+/**
+ * URL을 받아 5초 타임아웃 내에 안전하게 웹페이지를 조회하고
  * JSON-LD Recipe 우선 추출 -> HTML 정제 Fallback을 수행합니다.
  * @param targetUrl 조회할 레시피 URL
- * @param timeoutMs 웹페이지 조회 타임아웃 (기본 6000ms = 6초)
+ * @param timeoutMs 웹페이지 조회 타임아웃 (기본 5000ms = 5초)
  */
 export async function fetchAndParseRecipePage(
   targetUrl: string,
-  timeoutMs: number = 6000
+  timeoutMs: number = 5000
 ): Promise<RecipePageParseResult> {
   const startedAt = Date.now();
 
+  // 0. URL 전처리 (모바일 최적화 등)
+  const normalizedUrl = normalizeRecipeRequestUrl(targetUrl);
+
   // 1. SSRF 방어 검증
-  const validation = validateAndSanitizeUrl(targetUrl);
+  const validation = validateAndSanitizeUrl(normalizedUrl);
   if (!validation.valid || !validation.sanitizedUrl) {
     return {
       success: false,
@@ -480,13 +506,13 @@ export async function fetchAndParseRecipePage(
   let html = '';
   let status = 0;
 
-  // 2. 6초 단축 타임아웃으로 웹페이지 요청
+  // 2. 5초 단축 타임아웃으로 웹페이지 요청
   try {
     const fetchStart = Date.now();
     const response = await fetch(sanitizedUrl, {
       headers: {
         'User-Agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+          'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
         Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
       },
@@ -529,7 +555,7 @@ export async function fetchAndParseRecipePage(
       parseDurationMs: 0,
       isBlockedOrForbidden: false,
       errorMessage: isTimeout
-        ? '웹페이지 응답 시간이 초과되었습니다(6초). 텍스트로 복사하여 가져오기를 시도해주세요.'
+        ? '웹페이지 응답 시간이 초과되었습니다(5초). 텍스트로 복사하여 가져오기를 시도해주세요.'
         : '해당 사이트에 접속할 수 없습니다. URL 주소를 확인해주세요.',
     };
   }

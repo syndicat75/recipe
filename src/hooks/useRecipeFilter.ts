@@ -4,7 +4,7 @@
  */
 
 import { useState, useMemo } from 'react';
-import { Recipe, FilterCategory, SortOption } from '../types/recipe';
+import { Recipe, FilterCategory, SortOption, RecipeCategoryDoc } from '../types/recipe';
 import { CATEGORY_LIST } from '../config/appConfig';
 
 export interface UseRecipeFilterOptions {
@@ -14,6 +14,8 @@ export interface UseRecipeFilterOptions {
   bookmarkedIds: number[];
   /** 레시피별 메모 맵 */
   userNotes: Record<number, string>;
+  /** 동적 카테고리 목록 */
+  categories?: RecipeCategoryDoc[];
 }
 
 export interface UseRecipeFilterReturn {
@@ -43,19 +45,36 @@ export function useRecipeFilter({
   recipes,
   bookmarkedIds,
   userNotes,
+  categories,
 }: UseRecipeFilterOptions): UseRecipeFilterReturn {
   const [activeCategory, setActiveCategory] = useState<FilterCategory>('전체');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [sortOption, setSortOption] = useState<SortOption>('default');
 
-  // 카테고리별 개수 맵 계산
+  // 카테고리별 개수 맵 계산 (동적 카테고리 + 기본 카테고리 + 실제 레시피에 존재하는 모든 카테고리 통합)
   const categoryCounts = useMemo((): Record<string, number> => {
     const counts: Record<string, number> = {};
+
+    // 1. 기본 카테고리 0으로 초기화
     CATEGORY_LIST.forEach((cat) => {
-      counts[cat] = recipes.filter((r) => r.category === cat).length;
+      counts[cat] = 0;
     });
+
+    // 2. 동적 카테고리 목록이 있으면 0으로 초기화
+    if (categories && Array.isArray(categories)) {
+      categories.forEach((cat) => {
+        counts[cat.name] = 0;
+      });
+    }
+
+    // 3. 실제 레시피 순회하며 카운트 누적
+    recipes.forEach((r) => {
+      const cat = r.category || '기타';
+      counts[cat] = (counts[cat] || 0) + 1;
+    });
+
     return counts;
-  }, [recipes]);
+  }, [recipes, categories]);
 
   // 검색 및 필터링, 정렬 적용된 레시피 목록 계산
   const filteredAndSortedRecipes = useMemo((): Recipe[] => {

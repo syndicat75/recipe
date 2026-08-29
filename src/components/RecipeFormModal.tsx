@@ -17,8 +17,8 @@ import {
   Link2,
   Loader2,
 } from 'lucide-react';
-import { APP_CONFIG, CATEGORY_LIST } from '../config/appConfig';
-import { Recipe, RecipeCategory, SaveRecipeResult } from '../types/recipe';
+import { APP_CONFIG, DEFAULT_CATEGORY_DOCS, FALLBACK_CATEGORY } from '../config/appConfig';
+import { Recipe, RecipeCategory, RecipeCategoryDoc, SaveRecipeResult } from '../types/recipe';
 import { logger } from '../utils/logger';
 
 interface RecipeFormModalProps {
@@ -44,6 +44,8 @@ interface RecipeFormModalProps {
   showToast: (msg: string, type?: 'success' | 'info' | 'warning' | 'error') => void;
   /** 관리자 여부 */
   isAdmin?: boolean;
+  /** 동적 카테고리 문서 목록 */
+  categories?: RecipeCategoryDoc[];
 }
 
 /**
@@ -59,6 +61,7 @@ export const RecipeFormModal: React.FC<RecipeFormModalProps> = ({
   onDeleteRecipe,
   showToast,
   isAdmin = false,
+  categories = DEFAULT_CATEGORY_DOCS,
 }) => {
   const isEditMode = !!recipeToEdit;
 
@@ -109,9 +112,10 @@ export const RecipeFormModal: React.FC<RecipeFormModalProps> = ({
         setUserNote(initialUserNote || recipeToEdit.userNotes || '');
         setImageTab(recipeToEdit.imageUrl ? 'url' : 'emoji');
       } else {
-        logger.info('RecipeFormModal.useEffect', '신규 등록 모드 초기화 (기본 1인분)');
+        const defaultCat = categories.find((c) => c.isActive)?.name || FALLBACK_CATEGORY;
+        logger.info('RecipeFormModal.useEffect', `신규 등록 모드 초기화 (기본 카테고리: ${defaultCat})`);
         setName('');
-        setCategory('반찬');
+        setCategory(defaultCat);
         setIcon('🍳');
         setImageUrl('');
         setIngredients('');
@@ -375,14 +379,22 @@ export const RecipeFormModal: React.FC<RecipeFormModalProps> = ({
               <label className="block text-xs font-bold text-stone-700">카테고리 *</label>
               <select
                 value={category}
-                onChange={(e) => setCategory(e.target.value as RecipeCategory)}
+                onChange={(e) => setCategory(e.target.value)}
                 className="mt-1.5 w-full rounded-xl border border-orange-200 bg-[#fffdfa] px-3.5 py-2.5 text-sm text-stone-800 outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100"
               >
-                {CATEGORY_LIST.map((cat) => (
-                  <option key={cat} value={cat}>
-                    {cat}
+                {/* 현재 레시피의 카테고리가 비활성화 상태이거나 목록에 없는 경우 유지용 옵션 */}
+                {category && !categories.some((c) => c.isActive && c.name === category) && (
+                  <option value={category}>
+                    ⚠️ {category} (현재 카테고리)
                   </option>
-                ))}
+                )}
+                {categories
+                  .filter((c) => c.isActive)
+                  .map((cat) => (
+                    <option key={cat.id} value={cat.name}>
+                      {cat.icon ? `${cat.icon} ` : ''}{cat.name}
+                    </option>
+                  ))}
               </select>
             </div>
           </div>

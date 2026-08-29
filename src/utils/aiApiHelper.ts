@@ -71,7 +71,9 @@ export async function callAiApi<T = unknown>(
   } catch (netErr) {
     logger.error('aiApiHelper.callAiApi', `네트워크/타임아웃 오류: ${endpoint}`, netErr);
     if (netErr instanceof Error && (netErr.name === 'TimeoutError' || netErr.name === 'AbortError')) {
-      throw new Error('AI 분석 시간이 초과되었습니다. 잠시 후 다시 시도해주세요.');
+      throw new Error(
+        'AI 분석 응답 시간이 초과되었습니다. 해당 사이트의 응답이 지연될 수 있으니, 레시피 텍스트를 복사하여 "텍스트 가져오기"에 붙여넣어 주시면 훨씬 빠르고 안정적으로 가져올 수 있습니다.'
+      );
     }
     throw new Error('인터넷 연결 상태를 확인하거나 잠시 후 다시 시도해주세요.');
   }

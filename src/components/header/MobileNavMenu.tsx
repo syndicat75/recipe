@@ -21,6 +21,7 @@ import {
   RefreshCw,
   ShoppingCart,
   Timer,
+  FolderKanban,
 } from 'lucide-react';
 import { FilterCategory } from '../../types/recipe';
 import { AppViewMode } from '../../types/navigation';
@@ -47,6 +48,8 @@ export interface MobileNavMenuProps {
   onOpenFamilyShare: () => void;
   onOpenAddRecipe: () => void;
   onOpenImportRecipe: () => void;
+  /** 카테고리 관리 모달 열기 핸들러 (관리자 전용) */
+  onOpenCategoryManager?: () => void;
   onOpenBackupRestore: () => void;
   onRestoreDefaultRecipes?: () => void;
   /** 칼로리 일괄 분석 모달 열기 핸들러 (관리자 전용) */
@@ -80,6 +83,7 @@ export const MobileNavMenu: React.FC<MobileNavMenuProps> = ({
   onOpenFamilyShare,
   onOpenAddRecipe,
   onOpenImportRecipe,
+  onOpenCategoryManager,
   onOpenBackupRestore,
   onRestoreDefaultRecipes,
   onOpenAdminCalories,
@@ -426,6 +430,26 @@ export const MobileNavMenu: React.FC<MobileNavMenuProps> = ({
             <Camera className="h-4 w-4 text-orange-500" />
             <span>레시피 가져오기 / 사진 인식</span>
           </button>
+
+          {onOpenCategoryManager && (
+            <button
+              type="button"
+              onClick={() => {
+                logger.info('MobileNavMenu', '카테고리 관리 도구 클릭');
+                onOpenCategoryManager();
+                onClose();
+              }}
+              className="w-full flex items-center justify-between rounded-xl p-2.5 text-xs font-bold text-stone-700 bg-stone-50 hover:bg-orange-50 transition text-left"
+            >
+              <div className="flex items-center gap-2">
+                <FolderKanban className="h-4 w-4 text-orange-500" />
+                <span>카테고리 관리</span>
+              </div>
+              <span className="text-[10px] bg-orange-100 text-orange-800 font-bold px-1.5 py-0.5 rounded">
+                관리자
+              </span>
+            </button>
+          )}
 
           {onOpenAdminCalories && (
             <button

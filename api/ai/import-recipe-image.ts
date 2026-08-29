@@ -40,10 +40,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       }
     }
 
-    const { imageBase64, mimeType, requestId } = (body || {}) as {
+    const { imageBase64, mimeType, requestId, availableCategories } = (body || {}) as {
       imageBase64?: string;
       mimeType?: string;
       requestId?: string;
+      availableCategories?: string[];
     };
 
     if (!imageBase64 || !imageBase64.trim()) {
@@ -58,6 +59,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       imageBase64,
       mimeType,
       requestId,
+      availableCategories,
     });
 
     if (!result.success) {
