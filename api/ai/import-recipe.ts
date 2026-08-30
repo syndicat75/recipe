@@ -1,10 +1,11 @@
 /**
  * @file api/ai/import-recipe.ts
  * @description Vercel Serverless Function - 웹 URL 또는 텍스트 기반 레시피 구조화 추출 API.
- * handler 내부 dynamic import를 적용하여 공통 모듈 로딩 오류 발생 시에도 JSON 형태로 안전하게 반환합니다.
+ * Vercel Serverless 및 Node 22 ESM 환경에 맞춰 정적 import를 적용하고 상세 런타임 오류 진단 로깅을 제공합니다.
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { importRecipeFromTextOrUrl } from '../../lib/geminiService';
 
 /**
  * Vercel Serverless Function 핸들러
@@ -25,8 +26,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   }
 
   try {
-    const { importRecipeFromTextOrUrl } = await import('../../lib/geminiService.js');
-
     let body = req.body;
     if (typeof body === 'string') {
       try {
@@ -69,12 +68,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
 
     res.status(200).json(result);
   } catch (error) {
-    console.error('[import-recipe] module/runtime error:', error);
+    console.error('[import-recipe] fatal runtime error', {
+      name: error instanceof Error ? error.name : 'Unknown',
+      message: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
 
     res.status(500).json({
       success: false,
       error: 'AI 서버 실행 중 오류가 발생했습니다.',
-      details: error instanceof Error ? error.stack || error.message : String(error),
+      errorCode: 'AI_IMPORT_RUNTIME_ERROR',
+      details: error instanceof Error ? error.message : String(error),
     });
   }
 }

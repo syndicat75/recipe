@@ -54,7 +54,7 @@ async function generateWithFallback(
   options: GenerateFallbackOptions = {}
 ): Promise<GenerateContentResult & { executionMeta?: ModelExecutionMeta }> {
   const primaryModel = 'gemini-3.7-flash';
-  const fallbackModels = ['gemini-flash-latest', 'gemini-3.1-flash-lite'];
+  const fallbackModels = ['gemini-2.5-flash', 'gemini-2.5-flash-lite'];
   const retryMode = options.retryMode || 'standard';
   const startedAt = options.startedAt || Date.now();
   const callStart = Date.now();

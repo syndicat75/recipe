@@ -422,11 +422,11 @@ export function cleanHtmlFallback(html: string): string {
 
   // 2. 레시피 핵심 유력 컨테이너 (네이버 스마트에디터, 만개의레시피, 블로그, 요리사이트) 정밀 탐색
   // - se-main-container / se-component (네이버 블로그)
-  // - view2_summary / ready_ingre3 / view_step (만개의레시피)
+  // - view2_summary / ready_ingre3 / view_step / recipe_step / ingre_list (만개의레시피 모바일/PC)
   // - entry-content / article_content (티스토리/다음)
   // - recipe, ingredient, cook, step, method, 재료, 만드는법 등
   const candidateRegex =
-    /<(?:div|section|article|main)\b[^>]*(?:class|id)=["'][^"']*(?:recipe|ingredient|view2|cook|step|method|재료|만드는법|se-main-container|entry-content|view_step)[^"']*["'][^>]*>([\s\S]*?)<\/(?:div|section|article|main)>/gi;
+    /<(?:div|section|article|main)\b[^>]*(?:class|id)=["'][^"']*(?:recipe|ingredient|view2|cook|step|method|재료|만드는법|se-main-container|entry-content|view_step|recipe_step|ready_ingre|ingre_list)[^"']*["'][^>]*>([\s\S]*?)<\/(?:div|section|article|main)>/gi;
 
   const candidateBlocks: string[] = [];
   let candidateMatch: RegExpExecArray | null;
@@ -522,6 +522,22 @@ export async function fetchAndParseRecipePage(
 
     fetchDurationMs = Date.now() - fetchStart;
     status = response.status;
+
+    // 리디렉션된 경우 최종 도착 URL에 대해 SSRF 방어 재검증
+    if (response.url && response.url !== sanitizedUrl) {
+      const redirectCheck = validateAndSanitizeUrl(response.url);
+      if (!redirectCheck.valid) {
+        return {
+          success: false,
+          sourceType: 'failed',
+          url: response.url,
+          extractedText: '',
+          fetchDurationMs,
+          parseDurationMs: 0,
+          errorMessage: '리디렉션된 웹 주소가 안전하지 않아 접근이 차단되었습니다.',
+        };
+      }
+    }
 
     if (!response.ok) {
       const isForbiddenOrBlocked = response.status === 403 || response.status === 429 || response.status === 401;

@@ -5,6 +5,7 @@
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { recommendMenuFromCandidates } from '../../lib/geminiService';
 
 /**
  * Vercel Serverless Function 핸들러
@@ -25,8 +26,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   }
 
   try {
-    const { recommendMenuFromCandidates } = await import('../../lib/geminiService.js');
-
     let body = req.body;
     if (typeof body === 'string') {
       try {
@@ -70,12 +69,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
 
     res.status(200).json(result);
   } catch (error) {
-    console.error('[recommend-menu] module/runtime error:', error);
+    console.error('[recommend-menu] fatal runtime error', {
+      name: error instanceof Error ? error.name : 'Unknown',
+      message: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
 
     res.status(500).json({
       success: false,
       error: 'AI 서버 실행 중 오류가 발생했습니다.',
-      details: error instanceof Error ? error.stack || error.message : String(error),
+      errorCode: 'AI_RECOMMEND_MENU_RUNTIME_ERROR',
+      details: error instanceof Error ? error.message : String(error),
     });
   }
 }
