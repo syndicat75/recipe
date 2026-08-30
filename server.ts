@@ -16,7 +16,7 @@ import {
   recommendMenuFromCandidates,
   analyzeRecipeCalories,
   getGeminiClient,
-} from './lib/geminiService';
+} from './lib/geminiService.js';
 
 // 환경 변수 로드 (로컬 개발 환경)
 dotenv.config();

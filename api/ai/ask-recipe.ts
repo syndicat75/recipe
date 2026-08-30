@@ -5,7 +5,7 @@
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { askChefAboutRecipe } from '../../lib/geminiService';
+import { askChefAboutRecipe } from '../../lib/geminiService.js';
 
 /**
  * Vercel Serverless Function 핸들러

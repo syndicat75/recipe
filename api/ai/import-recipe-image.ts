@@ -5,7 +5,7 @@
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { importRecipeFromImage } from '../../lib/geminiService';
+import { importRecipeFromImage } from '../../lib/geminiService.js';
 
 /**
  * Vercel Serverless Function 핸들러

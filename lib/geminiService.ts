@@ -7,7 +7,7 @@
  */
 
 import { GoogleGenAI, Type } from '@google/genai';
-import { fetchAndParseRecipePage } from './recipePageParser';
+import { fetchAndParseRecipePage } from './recipePageParser.js';
 
 type GenerateContentParameters = Parameters<GoogleGenAI['models']['generateContent']>[0];
 type GenerateContentResult = Awaited<ReturnType<GoogleGenAI['models']['generateContent']>>;

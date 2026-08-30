@@ -5,7 +5,7 @@
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { recommendMenuFromCandidates } from '../../lib/geminiService';
+import { recommendMenuFromCandidates } from '../../lib/geminiService.js';
 
 /**
  * Vercel Serverless Function 핸들러
