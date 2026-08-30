@@ -85,6 +85,8 @@ export interface Recipe {
   caloriesConfidence?: 'high' | 'medium' | 'low';
   /** 칼로리 세부 내역/주요 기여 재료 설명 (선택) */
   calorieBreakdown?: string;
+  /** 1인분 기준 상세 영양성분 정보 (열량, 단백질, 탄수화물, 지방, 나트륨, 식이섬유) - 선택 */
+  nutrition?: NutritionInfo;
   /** 동기화 스코프 ('public': Firestore 공개 레시피, 'private': Firestore 개인 계정 전용 레시피, 'local': 비로그인 기기 전용) */
   syncScope?: 'public' | 'private' | 'local';
   /** 생성 일시 타임스탬프 */
@@ -249,6 +251,42 @@ export interface ToastMessage {
 }
 
 /**
+ * 레시피 1인분 예상 영양성분 정보 (AI 분석 추정치)
+ */
+export interface NutritionInfo {
+  /** 열량 (kcal, 1인분 기준) */
+  calories: number;
+  /** 단백질 (g, 1인분 기준) */
+  protein: number;
+  /** 탄수화물 (g, 1인분 기준) */
+  carbs: number;
+  /** 지방 (g, 1인분 기준) */
+  fat: number;
+  /** 나트륨 (mg, 1인분 기준) */
+  sodium: number;
+  /** 식이섬유 (g, 1인분 기준) */
+  fiber: number;
+  /** 채소 비중 수준 ('high': 풍부/채소 위주, 'medium': 보통, 'low': 적음) */
+  vegetableLevel?: 'high' | 'medium' | 'low';
+}
+
+/**
+ * 영양 성분 검색 필터 조건 인터페이스
+ */
+export interface NutritionFilterState {
+  /** 최대 칼로리 (kcal 이하, undefined면 필터 미적용) */
+  maxCalories?: number;
+  /** 최소 단백질 (g 이상, undefined면 필터 미적용) */
+  minProtein?: number;
+  /** 최대 나트륨 (mg 이하, undefined면 필터 미적용) */
+  maxSodium?: number;
+  /** 최소 식이섬유 (g 이상, undefined면 필터 미적용) */
+  minFiber?: number;
+  /** 채소 많은 메뉴만 보기 여부 */
+  vegetableRichOnly?: boolean;
+}
+
+/**
  * 레시피 정렬 기준
  */
 export type SortOption =
@@ -261,10 +299,13 @@ export type SortOption =
   | 'ingredientsAsc'
   | 'ingredientsDesc'
   | 'caloriesAsc'
-  | 'caloriesDesc';
+  | 'caloriesDesc'
+  | 'proteinDesc'
+  | 'sodiumAsc'
+  | 'fiberDesc';
 
 /**
- * AI 칼로리 분석 요청 파라미터 인터페이스
+ * AI 칼로리 및 영양성분 분석 요청 파라미터 인터페이스
  */
 export interface AnalyzeCaloriesRequest {
   recipeId: number;
@@ -275,7 +316,7 @@ export interface AnalyzeCaloriesRequest {
 }
 
 /**
- * AI 칼로리 분석 결과 인터페이스
+ * AI 칼로리 및 영양성분 분석 결과 인터페이스
  */
 export interface CalorieAnalysisResult {
   recipeId: number;
@@ -284,6 +325,8 @@ export interface CalorieAnalysisResult {
   caloriesAnalyzedServings: number;
   caloriesConfidence: 'high' | 'medium' | 'low';
   calorieBreakdown?: string;
+  /** 1인분 기준 상세 영양정보 */
+  nutrition?: NutritionInfo;
 }
 
 /**

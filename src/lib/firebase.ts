@@ -19,6 +19,7 @@ import {
   persistentMultipleTabManager,
   Firestore,
 } from 'firebase/firestore';
+import { getStorage, FirebaseStorage } from 'firebase/storage';
 import { logger } from '../utils/logger';
 
 /**
@@ -90,6 +91,7 @@ export const FIREBASE_APP_NAME = 'my-recipe-client';
 let firebaseApp: FirebaseApp | null = null;
 let authInstance: Auth | null = null;
 let dbInstance: Firestore | null = null;
+let storageInstance: FirebaseStorage | null = null;
 let googleAuthProvider: GoogleAuthProvider | null = null;
 
 try {
@@ -139,17 +141,28 @@ try {
     logger.warn('Firebase.firestore', `기존 Firestore 인스턴스 연결 시도: ${(fsInitErr as Error).message}`);
     dbInstance = getFirestore(firebaseApp);
   }
+
+  // 7. Firebase Storage 초기화
+  try {
+    storageInstance = getStorage(firebaseApp);
+    logger.info('Firebase.storage', 'Firebase Storage 초기화 완료');
+  } catch (stInitErr) {
+    logger.warn('Firebase.storage', `Firebase Storage 초기화 경고: ${(stInitErr as Error).message}`);
+    storageInstance = null;
+  }
 } catch (error) {
   logger.error('Firebase.init', 'Firebase 초기화 실패, 로컬 전용 모드로 동작합니다.', error);
   firebaseApp = null;
   authInstance = null;
   dbInstance = null;
+  storageInstance = null;
   googleAuthProvider = null;
 }
 
 export const app = firebaseApp;
 export const auth = authInstance;
 export const db = dbInstance;
+export const storage = storageInstance;
 export const googleProvider = googleAuthProvider;
 export const isFirebaseReady: boolean = Boolean(firebaseApp && authInstance && dbInstance);
 

@@ -1,9 +1,9 @@
 /**
  * @file src/components/CookingModeModal.tsx
- * @description 주방에서 스마트폰을 거치하고 편리하게 요리할 수 있는 스마트 집중 조리 모드(Focus Cooking Mode).
- * Screen Wake Lock(화면 꺼짐 방지), Web Speech API 기반 한국어 음성 읽기(TTS) 및 음성 명령(STT),
- * Date.now() 기반 정확한 카운트다운 멀티 타이머, 조리 단계별 시간 자동 감지 버튼,
- * 진행 상태 자동 저장 및 복원, 완료 알림음(Web Audio API)을 제공합니다.
+ * @description 주방에서 스마트폰을 거치하고 손을 거의 대지 않고 요리할 수 있는 스마트 핸즈프리 집중 조리 모드(Focus Cooking Mode).
+ * Screen Wake Lock(화면 꺼짐 방지), Web Speech API 기반 양방향 한국어 음성 비서(STT/TTS 음향 루프 차단 및 디바운스),
+ * Date.now() 기반 정확한 카운트다운 멀티 타이머(음성 및 UI 동기화), 인분 맞춤 재료 음성 질의응답,
+ * 진행 상태 자동 저장 및 복원, 2단계 요리 완료 안전 확인 절차를 제공합니다.
  */
 
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
@@ -28,6 +28,8 @@ import {
   Plus,
   Trash2,
   ChefHat,
+  HelpCircle,
+  Settings,
 } from 'lucide-react';
 import { Recipe, ActiveTimerItem } from '../types/recipe';
 import { getScaledIngredientsList } from '../utils/scaler';
@@ -37,6 +39,14 @@ import {
   saveCookingProgress,
   clearCookingProgress,
 } from '../utils/storage';
+import {
+  useCookingVoiceAssistant,
+} from '../hooks/useCookingVoiceAssistant';
+import { CookingVoiceIntent } from '../utils/cookingVoiceCommands';
+import { formatSecondsToKoreanSpeech } from '../utils/koreanDurationParser';
+import { VoiceAssistantHelpModal } from './cooking/VoiceAssistantHelpModal';
+import { VoiceIntroModal } from './cooking/VoiceIntroModal';
+import { VoiceStatusBadge } from './cooking/VoiceStatusBadge';
 
 interface CookingModeModalProps {
   /** 조리 중인 레시피 데이터 */
@@ -50,11 +60,12 @@ interface CookingModeModalProps {
 }
 
 /**
- * 텍스트에서 시간(분, 초) 패턴을 추출합니다.
+ * 조리 단계 문장에서 시간(분, 초) 패턴을 추출합니다.
  * @param text 조리 단계 텍스트
  * @returns 감지된 분 또는 초 정보 목록
  */
 function extractCookingTimes(text: string): Array<{ label: string; seconds: number }> {
+  logger.debug('CookingModeModal.extractCookingTimes', `단계 내 시간 추출: "${text}"`);
   const results: Array<{ label: string; seconds: number }> = [];
   if (!text) return results;
 
@@ -92,8 +103,11 @@ function extractCookingTimes(text: string): Array<{ label: string; seconds: numb
  * Web Audio API를 활용해 타이머 종료 비프음을 재생합니다.
  */
 function playTimerAlarmSound(): void {
+  logger.info('CookingModeModal.playTimerAlarmSound', '타이머 알람 비프음 재생');
   try {
-    const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    const AudioContextClass =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
     if (!AudioContextClass) return;
     const ctx = new AudioContextClass();
 
@@ -134,17 +148,9 @@ export const CookingModeModal: React.FC<CookingModeModalProps> = ({
   const [isCompleted, setIsCompleted] = useState<boolean>(false);
   const [isWakeLockActive, setIsWakeLockActive] = useState<boolean>(false);
 
-  // 멀티 타이머 상태 (종료 예정 targetTimestamp 기반)
+  // 멀티 타이머 상태 (종료 예정 targetTimestamp 기반, UI와 음성명령이 100% 동일한 상태 공유)
   const [activeTimers, setActiveTimers] = useState<ActiveTimerItem[]>([]);
   const [nowTimestamp, setNowTimestamp] = useState<number>(Date.now());
-
-  // 음성 읽기(TTS) 상태
-  const [isSpeaking, setIsSpeaking] = useState<boolean>(false);
-
-  // 음성 명령(STT) 상태
-  const [isListening, setIsListening] = useState<boolean>(false);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const recognitionRef = useRef<any>(null);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const wakeLockRef = useRef<any>(null);
@@ -161,13 +167,15 @@ export const CookingModeModal: React.FC<CookingModeModalProps> = ({
   }, [recipe]);
 
   const totalSteps = steps.length;
+
+  // 현재 인분에 맞춤 계산된 재료 목록
   const scaledIngredients = useMemo(() => {
     if (!recipe) return [];
     return getScaledIngredientsList(recipe.ingredients, portionMultiplier);
   }, [recipe, portionMultiplier]);
 
   /**
-   * 타이머 1초 주기 tick 갱신
+   * 타이머 0.5초 주기 tick 갱신
    */
   useEffect(() => {
     const timerInterval = setInterval(() => {
@@ -177,23 +185,458 @@ export const CookingModeModal: React.FC<CookingModeModalProps> = ({
   }, []);
 
   /**
-   * 타이머 만료 감지 및 알람 처리
+   * 새 타이머 추가 및 시작
+   * @param label 타이머 명칭
+   * @param seconds 총 초 수
+   */
+  const handleStartTimer = useCallback((label: string, seconds: number): void => {
+    logger.info('CookingModeModal.handleStartTimer', `타이머 시작: ${label} (${seconds}초)`);
+    const newTimer: ActiveTimerItem = {
+      id: `timer_${Date.now()}_${Math.random().toString(36).substring(2, 5)}`,
+      label: label,
+      totalSeconds: seconds,
+      targetTimestamp: Date.now() + seconds * 1000,
+      isPaused: false,
+    };
+    setActiveTimers((prev) => [...prev, newTimer]);
+    showToast(`⏱️ [${label}] 타이머가 시작되었습니다.`, 'info');
+  }, [showToast]);
+
+  /**
+   * 타이머 삭제
+   */
+  const handleDeleteTimer = useCallback((timerId: string): void => {
+    logger.info('CookingModeModal.handleDeleteTimer', `타이머 삭제: ${timerId}`);
+    setActiveTimers((prev) => prev.filter((t) => t.id !== timerId));
+  }, []);
+
+  /**
+   * 타이머 일시정지
+   */
+  const handlePauseTimer = useCallback((timerId: string): void => {
+    logger.info('CookingModeModal.handlePauseTimer', `타이머 일시정지: ${timerId}`);
+    setActiveTimers((prev) =>
+      prev.map((t) => {
+        if (t.id === timerId && !t.isPaused) {
+          const remaining = Math.max(0, Math.ceil((t.targetTimestamp - Date.now()) / 1000));
+          return {
+            ...t,
+            isPaused: true,
+            remainingSecondsOnPause: remaining,
+          };
+        }
+        return t;
+      })
+    );
+  }, []);
+
+  /**
+   * 타이머 재개
+   */
+  const handleResumeTimer = useCallback((timerId: string): void => {
+    logger.info('CookingModeModal.handleResumeTimer', `타이머 재개: ${timerId}`);
+    setActiveTimers((prev) =>
+      prev.map((t) => {
+        if (t.id === timerId && t.isPaused) {
+          const rem = t.remainingSecondsOnPause || t.totalSeconds;
+          return {
+            ...t,
+            isPaused: false,
+            targetTimestamp: Date.now() + rem * 1000,
+          };
+        }
+        return t;
+      })
+    );
+  }, []);
+
+  /**
+   * 요리 완료 통합 처리 (버튼 및 음성명령 공통)
+   */
+  const handleCompleteCooking = useCallback((withVoiceCongrats: boolean = false): void => {
+    logger.info('CookingModeModal.handleCompleteCooking', '요리 완료 통합 처리 실행');
+    setIsCompleted(true);
+    if (recipe) {
+      clearCookingProgress(recipe.id);
+    }
+    showToast('🎉 요리가 완료되었습니다! 맛있게 드세요!', 'success');
+  }, [recipe, showToast]);
+
+  /**
+   * 다음 단계 이동
+   */
+  const handleNextStep = useCallback(
+    (onStepMoved?: (nextIdx: number, stepText: string) => void) => {
+      logger.info('CookingModeModal.handleNextStep', `다음 단계: 현재 ${currentStepIndex + 1}/${totalSteps}`);
+      if (!completedSteps.includes(currentStepIndex)) {
+        setCompletedSteps((prev) => [...prev, currentStepIndex]);
+      }
+
+      if (currentStepIndex < totalSteps - 1) {
+        const nextIdx = currentStepIndex + 1;
+        setCurrentStepIndex(nextIdx);
+        if (onStepMoved) {
+          onStepMoved(nextIdx, steps[nextIdx]);
+        }
+      } else {
+        handleCompleteCooking(true);
+      }
+    },
+    [currentStepIndex, totalSteps, completedSteps, steps, handleCompleteCooking]
+  );
+
+  /**
+   * 이전 단계 이동
+   */
+  const handlePrevStep = useCallback(
+    (onStepMoved?: (prevIdx: number, stepText: string) => void) => {
+      logger.info('CookingModeModal.handlePrevStep', `이전 단계: 현재 ${currentStepIndex + 1}/${totalSteps}`);
+      if (isCompleted) {
+        setIsCompleted(false);
+        return;
+      }
+      if (currentStepIndex > 0) {
+        const prevIdx = currentStepIndex - 1;
+        setCurrentStepIndex(prevIdx);
+        if (onStepMoved) {
+          onStepMoved(prevIdx, steps[prevIdx]);
+        }
+      }
+    },
+    [isCompleted, currentStepIndex, steps]
+  );
+
+  // 음성 명령 실행 핸들러
+  const handleVoiceIntent = useCallback(
+    (intent: CookingVoiceIntent) => {
+      logger.info('CookingModeModal.handleVoiceIntent', `음성 인텐트 수신: ${intent.type}`, intent);
+
+      switch (intent.type) {
+        case 'NEXT_STEP': {
+          handleNextStep((nextIdx, stepText) => {
+            voiceAssistant.setExecutionFeedback('✓ 다음 단계로 이동');
+            if (voiceAssistant.settings.autoReadNextStep) {
+              voiceAssistant.speak(`${nextIdx + 1}단계. ${stepText}`);
+            }
+          });
+          break;
+        }
+
+        case 'PREV_STEP': {
+          handlePrevStep((prevIdx, stepText) => {
+            voiceAssistant.setExecutionFeedback('✓ 이전 단계로 이동');
+            if (voiceAssistant.settings.autoReadNextStep) {
+              voiceAssistant.speak(`${prevIdx + 1}단계. ${stepText}`);
+            }
+          });
+          break;
+        }
+
+        case 'READ_STEP': {
+          const text = steps[currentStepIndex];
+          voiceAssistant.setExecutionFeedback('✓ 현재 단계 읽기');
+          voiceAssistant.speak(`${currentStepIndex + 1}단계. ${text}`);
+          break;
+        }
+
+        case 'STEP_STATUS': {
+          voiceAssistant.setExecutionFeedback('✓ 진행 단계 안내');
+          voiceAssistant.speak(`총 ${totalSteps}단계 중 현재 ${currentStepIndex + 1}단계입니다.`);
+          break;
+        }
+
+        case 'FIRST_STEP': {
+          setCurrentStepIndex(0);
+          voiceAssistant.setExecutionFeedback('✓ 첫 단계로 이동');
+          if (voiceAssistant.settings.autoReadNextStep) {
+            voiceAssistant.speak(`1단계. ${steps[0]}`);
+          }
+          break;
+        }
+
+        case 'READ_INGREDIENTS': {
+          voiceAssistant.setExecutionFeedback('✓ 전체 재료 읽기');
+          const maxIngredientsToRead = 8;
+          const readList = scaledIngredients.slice(0, maxIngredientsToRead).join(', ');
+          const extraText =
+            scaledIngredients.length > maxIngredientsToRead
+              ? ` 외 ${scaledIngredients.length - maxIngredientsToRead}가지 재료가 있습니다.`
+              : '';
+          voiceAssistant.speak(
+            `현재 ${portionMultiplier}배 기준 재료입니다. ${readList}${extraText}`
+          );
+          break;
+        }
+
+        case 'QUERY_INGREDIENT': {
+          const query = intent.ingredient.toLowerCase();
+          logger.info('CookingModeModal.handleVoiceIntent', `특정 재료 조회: "${query}"`);
+
+          // scaledIngredients에서 일치하는 재료 찾기
+          const matched = scaledIngredients.find((item) =>
+            item.toLowerCase().includes(query)
+          );
+
+          if (matched) {
+            voiceAssistant.setExecutionFeedback(`✓ ${matched}`);
+            voiceAssistant.speak(`${matched}이 필요합니다.`);
+          } else {
+            voiceAssistant.setExecutionFeedback(`'${intent.ingredient}' 재료 없음`, false);
+            voiceAssistant.speak(`현재 레시피에서 '${intent.ingredient}' 재료를 찾지 못했습니다.`);
+          }
+          break;
+        }
+
+        case 'START_TIMER': {
+          const label = intent.label || `${formatSecondsToKoreanSpeech(intent.seconds)} 타이머`;
+          handleStartTimer(label, intent.seconds);
+          voiceAssistant.setExecutionFeedback(`✓ ${label} 시작`);
+          voiceAssistant.speak(`${label}를 시작합니다.`);
+          break;
+        }
+
+        case 'START_STEP_TIMER': {
+          const currentText = steps[currentStepIndex] || '';
+          const detected = extractCookingTimes(currentText);
+          if (detected.length === 1) {
+            handleStartTimer(detected[0].label, detected[0].seconds);
+            voiceAssistant.setExecutionFeedback(`✓ ${detected[0].label} 시작`);
+            voiceAssistant.speak(`${detected[0].label}를 시작합니다.`);
+          } else if (detected.length > 1) {
+            const labels = detected.map((d) => d.label).join('와 ');
+            voiceAssistant.setExecutionFeedback('타이머 시간 선택 안내');
+            voiceAssistant.speak(`현재 단계에 ${labels}가 있습니다. 몇 분 타이머를 시작할까요?`);
+          } else {
+            voiceAssistant.setExecutionFeedback('단계 내 감지된 시간 없음', false);
+            voiceAssistant.speak('현재 단계에서 감지된 조리 시간이 없습니다. 필요하신 시간을 말씀해주세요.');
+          }
+          break;
+        }
+
+        case 'TIMER_STATUS': {
+          if (activeTimers.length === 0) {
+            voiceAssistant.setExecutionFeedback('진행 중인 타이머 없음');
+            voiceAssistant.speak('현재 진행 중인 타이머가 없습니다.');
+          } else if (activeTimers.length === 1) {
+            const t = activeTimers[0];
+            const remaining = Math.max(0, Math.ceil((t.targetTimestamp - Date.now()) / 1000));
+            const formatted = formatSecondsToKoreanSpeech(remaining);
+            voiceAssistant.setExecutionFeedback(`✓ 남은 시간: ${formatted}`);
+            voiceAssistant.speak(`${t.label}가 ${formatted} 남았습니다.`);
+          } else {
+            const listStr = activeTimers
+              .map((t) => {
+                const rem = Math.max(0, Math.ceil((t.targetTimestamp - Date.now()) / 1000));
+                return `${t.label} ${formatSecondsToKoreanSpeech(rem)}`;
+              })
+              .join(', ');
+            voiceAssistant.setExecutionFeedback(`✓ 타이머 ${activeTimers.length}개 상태 안내`);
+            voiceAssistant.speak(`${listStr} 남았습니다.`);
+          }
+          break;
+        }
+
+        case 'PAUSE_TIMER': {
+          if (activeTimers.length === 0) {
+            voiceAssistant.setExecutionFeedback('정지할 타이머 없음', false);
+            voiceAssistant.speak('정지할 타이머가 없습니다.');
+          } else if (intent.targetLabel) {
+            const target = activeTimers.find((t) =>
+              t.label.includes(intent.targetLabel!)
+            );
+            if (target) {
+              handlePauseTimer(target.id);
+              voiceAssistant.setExecutionFeedback(`✓ ${target.label} 일시정지`);
+              voiceAssistant.speak(`${target.label}를 일시정지했습니다.`);
+            } else {
+              voiceAssistant.setExecutionFeedback(`'${intent.targetLabel}' 타이머 없음`, false);
+              voiceAssistant.speak(`'${intent.targetLabel}' 타이머를 찾을 수 없습니다.`);
+            }
+          } else if (activeTimers.length === 1) {
+            handlePauseTimer(activeTimers[0].id);
+            voiceAssistant.setExecutionFeedback(`✓ ${activeTimers[0].label} 일시정지`);
+            voiceAssistant.speak(`${activeTimers[0].label}를 일시정지했습니다.`);
+          } else {
+            voiceAssistant.setExecutionFeedback('어떤 타이머를 멈출지 말씀해주세요');
+            voiceAssistant.speak(
+              `현재 타이머가 ${activeTimers.length}개 있습니다. 어떤 타이머를 멈출까요?`
+            );
+          }
+          break;
+        }
+
+        case 'RESUME_TIMER': {
+          const paused = activeTimers.filter((t) => t.isPaused);
+          if (paused.length === 0) {
+            voiceAssistant.setExecutionFeedback('정지된 타이머 없음');
+            voiceAssistant.speak('일시정지된 타이머가 없습니다.');
+          } else if (intent.targetLabel) {
+            const target = paused.find((t) => t.label.includes(intent.targetLabel!));
+            if (target) {
+              handleResumeTimer(target.id);
+              voiceAssistant.setExecutionFeedback(`✓ ${target.label} 재개`);
+              voiceAssistant.speak(`${target.label}를 다시 시작합니다.`);
+            } else {
+              voiceAssistant.setExecutionFeedback(`'${intent.targetLabel}' 타이머 없음`, false);
+              voiceAssistant.speak(`'${intent.targetLabel}' 정지된 타이머를 찾을 수 없습니다.`);
+            }
+          } else {
+            paused.forEach((t) => handleResumeTimer(t.id));
+            voiceAssistant.setExecutionFeedback('✓ 타이머 재개');
+            voiceAssistant.speak('타이머를 다시 시작합니다.');
+          }
+          break;
+        }
+
+        case 'CANCEL_TIMER': {
+          if (activeTimers.length === 0) {
+            voiceAssistant.setExecutionFeedback('취소할 타이머 없음', false);
+            voiceAssistant.speak('취소할 타이머가 없습니다.');
+          } else if (intent.targetLabel) {
+            const target = activeTimers.find((t) =>
+              t.label.includes(intent.targetLabel!)
+            );
+            if (target) {
+              handleDeleteTimer(target.id);
+              voiceAssistant.setExecutionFeedback(`✓ ${target.label} 취소`);
+              voiceAssistant.speak(`${target.label}를 취소했습니다.`);
+            } else {
+              voiceAssistant.setExecutionFeedback(`'${intent.targetLabel}' 타이머 없음`, false);
+              voiceAssistant.speak(`'${intent.targetLabel}' 타이머를 찾을 수 없습니다.`);
+            }
+          } else if (activeTimers.length === 1) {
+            handleDeleteTimer(activeTimers[0].id);
+            voiceAssistant.setExecutionFeedback(`✓ ${activeTimers[0].label} 취소`);
+            voiceAssistant.speak(`${activeTimers[0].label}를 취소했습니다.`);
+          } else {
+            voiceAssistant.setExecutionFeedback('어떤 타이머를 취소할지 말씀해주세요');
+            voiceAssistant.speak('취소할 타이머 이름을 말씀해주세요.');
+          }
+          break;
+        }
+
+        case 'CANCEL_ALL_TIMERS': {
+          setActiveTimers([]);
+          voiceAssistant.setExecutionFeedback('✓ 모든 타이머 취소');
+          voiceAssistant.speak('모든 타이머를 취소했습니다.');
+          break;
+        }
+
+        case 'LIST_TIMERS': {
+          if (activeTimers.length === 0) {
+            voiceAssistant.setExecutionFeedback('진행 중인 타이머 없음');
+            voiceAssistant.speak('진행 중인 타이머가 없습니다.');
+          } else {
+            const labels = activeTimers.map((t) => t.label).join(', ');
+            voiceAssistant.setExecutionFeedback(`✓ 타이머 목록 (${activeTimers.length}개)`);
+            voiceAssistant.speak(`현재 ${activeTimers.length}개의 타이머가 있습니다: ${labels}`);
+          }
+          break;
+        }
+
+        case 'SHOW_INGREDIENTS': {
+          setShowIngredientsSidebar(true);
+          voiceAssistant.setExecutionFeedback('✓ 재료 목록 열기');
+          voiceAssistant.speak('재료 목록을 열었습니다.');
+          break;
+        }
+
+        case 'HIDE_INGREDIENTS': {
+          setShowIngredientsSidebar(false);
+          voiceAssistant.setExecutionFeedback('✓ 재료 목록 닫기');
+          voiceAssistant.speak('재료 목록을 닫았습니다.');
+          break;
+        }
+
+        case 'HELP': {
+          voiceAssistant.setShowHelpModal(true);
+          voiceAssistant.setExecutionFeedback('✓ 도움말 창 열림');
+          voiceAssistant.speak('도움말을 열었습니다. 다음, 재료 읽어줘, 5분 타이머 등으로 말씀해보세요.');
+          break;
+        }
+
+        case 'STOP_LISTENING': {
+          voiceAssistant.stopListening();
+          voiceAssistant.setExecutionFeedback('✓ 음성명령 종료');
+          voiceAssistant.speak('음성 인식을 종료합니다.');
+          break;
+        }
+
+        case 'REQUEST_COMPLETE': {
+          voiceAssistant.requestConfirmation(
+            'COMPLETE',
+            '요리를 완료할까요? 완료하려면 완료해라고 말씀해주세요.'
+          );
+          break;
+        }
+
+        case 'CONFIRM_COMPLETE': {
+          if (voiceAssistant.pendingConfirmation === 'COMPLETE') {
+            voiceAssistant.clearConfirmation();
+            handleCompleteCooking(true);
+            voiceAssistant.setExecutionFeedback('✓ 요리 완료');
+            voiceAssistant.speak('요리가 완료되었습니다. 맛있게 드세요!');
+          } else {
+            voiceAssistant.setExecutionFeedback('확인 대기 중이 아닙니다', false);
+          }
+          break;
+        }
+
+        case 'UNKNOWN':
+        default: {
+          logger.info('CookingModeModal.handleVoiceIntent', `알 수 없는 명령: "${intent.raw}"`);
+          voiceAssistant.setExecutionFeedback(`인식되지 않음: "${intent.raw}"`, false);
+          break;
+        }
+      }
+    },
+    [
+      steps,
+      currentStepIndex,
+      totalSteps,
+      scaledIngredients,
+      portionMultiplier,
+      activeTimers,
+      handleNextStep,
+      handlePrevStep,
+      handleStartTimer,
+      handlePauseTimer,
+      handleResumeTimer,
+      handleDeleteTimer,
+      handleCompleteCooking,
+    ]
+  );
+
+  // 음성 비서 훅 인스턴스
+  const voiceAssistant = useCookingVoiceAssistant({
+    onCommand: handleVoiceIntent,
+    showToast,
+  });
+
+  /**
+   * 타이머 만료 감지 및 알람/진동/음성 안내 처리
    */
   useEffect(() => {
     activeTimers.forEach((timer) => {
       if (!timer.isPaused && timer.targetTimestamp <= nowTimestamp && timer.targetTimestamp > 0) {
         logger.info('CookingModeModal.timer', `타이머 만료: ${timer.label}`);
         playTimerAlarmSound();
+
         if ('vibrate' in navigator) {
           navigator.vibrate([300, 200, 300, 200, 500]);
         }
         showToast(`⏰ [${timer.label}] 시간이 완료되었습니다!`, 'success');
 
-        // 알림 후 타이머 제거
+        // 옵션: 타이머 완료 시 음성 안내
+        if (voiceAssistant.settings.voiceTimerAlert) {
+          voiceAssistant.speak(`${timer.label} 시간이 완료되었습니다.`);
+        }
+
+        // 만료된 타이머 제거
         setActiveTimers((prev) => prev.filter((t) => t.id !== timer.id));
       }
     });
-  }, [nowTimestamp, activeTimers, showToast]);
+  }, [nowTimestamp, activeTimers, showToast, voiceAssistant]);
 
   /**
    * 진행 상태 복원 및 Screen Wake Lock 활성화
@@ -241,12 +684,6 @@ export const CookingModeModal: React.FC<CookingModeModalProps> = ({
           wakeLockRef.current.release().catch(() => {});
           wakeLockRef.current = null;
         }
-        if (window.speechSynthesis) {
-          window.speechSynthesis.cancel();
-        }
-        if (recognitionRef.current) {
-          recognitionRef.current.stop();
-        }
       };
     }
   }, [recipe, totalSteps]);
@@ -266,163 +703,19 @@ export const CookingModeModal: React.FC<CookingModeModalProps> = ({
   }, [recipe, currentStepIndex, completedSteps, isCompleted]);
 
   /**
-   * 현재 단계 음성 읽기 (TTS)
+   * 현재 단계 음성 읽기 버튼 토글
    */
-  const handleSpeakCurrentStep = useCallback(() => {
-    if (!('speechSynthesis' in window)) {
-      showToast('이 브라우저는 음성 읽기를 지원하지 않습니다.', 'info');
-      return;
-    }
-
-    if (isSpeaking) {
-      window.speechSynthesis.cancel();
-      setIsSpeaking(false);
-      return;
-    }
-
-    const currentText = steps[currentStepIndex];
-    if (!currentText) return;
-
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(
-      `${currentStepIndex + 1}단계. ${currentText}`
-    );
-    utterance.lang = 'ko-KR';
-    utterance.rate = 0.95;
-
-    utterance.onstart = () => setIsSpeaking(true);
-    utterance.onend = () => setIsSpeaking(false);
-    utterance.onerror = () => setIsSpeaking(false);
-
-    window.speechSynthesis.speak(utterance);
-  }, [steps, currentStepIndex, isSpeaking, showToast]);
-
-  /**
-   * 다음 단계 이동
-   */
-  const handleNextStep = useCallback(() => {
-    logger.info('CookingModeModal.handleNextStep', `다음 단계: 현재 ${currentStepIndex + 1}/${totalSteps}`);
-    // 완료 목록에 현재 단계 추가
-    if (!completedSteps.includes(currentStepIndex)) {
-      setCompletedSteps((prev) => [...prev, currentStepIndex]);
-    }
-
-    if (currentStepIndex < totalSteps - 1) {
-      setCurrentStepIndex((prev) => prev + 1);
+  const handleToggleSpeakStep = useCallback(() => {
+    logger.info('CookingModeModal.handleToggleSpeakStep', `음성 읽기 버튼 클릭: isSpeaking=${voiceAssistant.isSpeaking}`);
+    if (voiceAssistant.isSpeaking) {
+      voiceAssistant.stopSpeaking();
     } else {
-      setIsCompleted(true);
-      if (recipe) clearCookingProgress(recipe.id);
-      showToast('🎉 요리가 완료되었습니다! 맛있게 드세요!', 'success');
-    }
-  }, [currentStepIndex, totalSteps, completedSteps, recipe, showToast]);
-
-  /**
-   * 이전 단계 이동
-   */
-  const handlePrevStep = useCallback(() => {
-    logger.info('CookingModeModal.handlePrevStep', `이전 단계: 현재 ${currentStepIndex + 1}/${totalSteps}`);
-    if (isCompleted) {
-      setIsCompleted(false);
-      return;
-    }
-    if (currentStepIndex > 0) {
-      setCurrentStepIndex((prev) => prev - 1);
-    }
-  }, [isCompleted, currentStepIndex]);
-
-  /**
-   * 새 타이머 추가 및 시작
-   * @param label 타이머 명칭
-   * @param seconds 총 초 수
-   */
-  const handleStartTimer = (label: string, seconds: number): void => {
-    logger.info('CookingModeModal.handleStartTimer', `타이머 시작: ${label} (${seconds}초)`);
-    const newTimer: ActiveTimerItem = {
-      id: `timer_${Date.now()}_${Math.random().toString(36).substring(2, 5)}`,
-      label: label,
-      totalSeconds: seconds,
-      targetTimestamp: Date.now() + seconds * 1000,
-      isPaused: false,
-    };
-    setActiveTimers((prev) => [...prev, newTimer]);
-    showToast(`⏱️ [${label}] 타이머가 시작되었습니다.`, 'info');
-  };
-
-  /**
-   * 타이머 삭제
-   */
-  const handleDeleteTimer = (timerId: string): void => {
-    setActiveTimers((prev) => prev.filter((t) => t.id !== timerId));
-  };
-
-  /**
-   * 음성 인식(STT) 명령 청취 토글
-   */
-  const toggleVoiceCommands = (): void => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const SpeechRecognitionClass = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognitionClass) {
-      showToast('이 브라우저는 음성 인식 명령을 지원하지 않습니다.', 'info');
-      return;
-    }
-
-    if (isListening) {
-      if (recognitionRef.current) {
-        recognitionRef.current.stop();
+      const currentText = steps[currentStepIndex];
+      if (currentText) {
+        voiceAssistant.speak(`${currentStepIndex + 1}단계. ${currentText}`);
       }
-      setIsListening(false);
-      showToast('음성 명령 청취가 꺼졌습니다.', 'info');
-      return;
     }
-
-    try {
-      const recognition = new SpeechRecognitionClass();
-      recognition.lang = 'ko-KR';
-      recognition.continuous = true;
-      recognition.interimResults = false;
-
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      recognition.onresult = (event: any) => {
-        const lastResultIndex = event.results.length - 1;
-        const transcript = event.results[lastResultIndex][0].transcript.trim().toLowerCase();
-        logger.info('CookingModeModal.voiceCommand', `음성 인식: "${transcript}"`);
-
-        if (transcript.includes('다음') || transcript.includes('넥스트') || transcript.includes('넘어가')) {
-          handleNextStep();
-          showToast('🗣️ 음성인식: 다음 단계로 이동합니다.', 'info');
-        } else if (transcript.includes('이전') || transcript.includes('뒤로')) {
-          handlePrevStep();
-          showToast('🗣️ 음성인식: 이전 단계로 이동합니다.', 'info');
-        } else if (transcript.includes('읽어') || transcript.includes('다시') || transcript.includes('설명')) {
-          handleSpeakCurrentStep();
-        } else if (transcript.includes('완료') || transcript.includes('종료') || transcript.includes('다했어')) {
-          setIsCompleted(true);
-        }
-      };
-
-      recognition.onerror = () => {
-        setIsListening(false);
-      };
-
-      recognition.onend = () => {
-        if (isListening && recognitionRef.current) {
-          try {
-            recognition.start();
-          } catch {
-            setIsListening(false);
-          }
-        }
-      };
-
-      recognition.start();
-      recognitionRef.current = recognition;
-      setIsListening(true);
-      showToast('🎤 음성 명령 시작 ("다음", "이전", "읽어줘")', 'success');
-    } catch (e) {
-      logger.error('CookingModeModal.toggleVoiceCommands', '음성인식 시작 실패', e);
-      setIsListening(false);
-    }
-  };
+  }, [voiceAssistant, steps, currentStepIndex]);
 
   if (!recipe) return null;
 
@@ -465,42 +758,66 @@ export const CookingModeModal: React.FC<CookingModeModalProps> = ({
           {/* TTS Button */}
           <button
             type="button"
-            onClick={handleSpeakCurrentStep}
+            id="cooking-tts-toggle-btn"
+            onClick={handleToggleSpeakStep}
             className={`flex items-center gap-1.5 rounded-2xl px-3 py-2 text-xs font-bold transition-all ${
-              isSpeaking
+              voiceAssistant.isSpeaking
                 ? 'bg-amber-500 text-stone-950 font-black animate-pulse'
                 : 'bg-stone-800 text-stone-300 hover:bg-stone-700'
             }`}
             title="한국어 음성으로 읽기"
+            aria-label="현재 단계 음성으로 읽기"
           >
-            {isSpeaking ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
-            <span className="hidden sm:inline">{isSpeaking ? '중지' : '음성 읽기'}</span>
+            {voiceAssistant.isSpeaking ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
+            <span className="hidden sm:inline">{voiceAssistant.isSpeaking ? '중지' : '음성 읽기'}</span>
           </button>
 
           {/* Voice Command STT Button */}
           <button
             type="button"
-            onClick={toggleVoiceCommands}
+            id="cooking-voice-toggle-btn"
+            onClick={voiceAssistant.toggleListening}
             className={`flex items-center gap-1.5 rounded-2xl px-3 py-2 text-xs font-bold transition-all ${
-              isListening
+              voiceAssistant.isListening
                 ? 'bg-emerald-500 text-stone-950 font-black ring-2 ring-emerald-400'
                 : 'bg-stone-800 text-stone-300 hover:bg-stone-700'
             }`}
-            title="핸즈프리 음성 명령"
+            title="핸즈프리 음성 명령 시작/종료"
+            aria-label="핸즈프리 음성 명령"
           >
-            {isListening ? <Mic className="h-4 w-4 animate-bounce" /> : <MicOff className="h-4 w-4" />}
-            <span className="hidden sm:inline">{isListening ? '음성인식 켜짐' : '음성명령'}</span>
+            {voiceAssistant.isListening ? (
+              <Mic className="h-4 w-4 animate-bounce" />
+            ) : (
+              <MicOff className="h-4 w-4" />
+            )}
+            <span className="hidden sm:inline">
+              {voiceAssistant.isListening ? '음성인식 켜짐' : '음성명령'}
+            </span>
+          </button>
+
+          {/* Help & Settings Modal Button */}
+          <button
+            type="button"
+            id="cooking-voice-help-btn"
+            onClick={() => voiceAssistant.setShowHelpModal(true)}
+            className="flex items-center gap-1 rounded-2xl bg-stone-800 px-2.5 py-2 text-xs font-bold text-stone-300 hover:bg-stone-700 transition-all"
+            title="음성명령 도움말 및 설정"
+            aria-label="음성명령 도움말"
+          >
+            <HelpCircle className="h-4 w-4 text-orange-400" />
           </button>
 
           {/* Ingredients Sidebar Toggle */}
           <button
             type="button"
+            id="cooking-ingredients-sidebar-btn"
             onClick={() => setShowIngredientsSidebar(!showIngredientsSidebar)}
             className={`flex items-center gap-1.5 rounded-2xl px-3 py-2 text-xs font-bold transition-all ${
               showIngredientsSidebar
                 ? 'bg-orange-500 text-white font-black'
                 : 'bg-stone-800 text-stone-300 hover:bg-stone-700'
             }`}
+            aria-label="재료 사이드바 열기"
           >
             <List className="h-4 w-4" />
             <span className="hidden sm:inline">재료 보기</span>
@@ -520,6 +837,7 @@ export const CookingModeModal: React.FC<CookingModeModalProps> = ({
           {/* Close Button */}
           <button
             type="button"
+            id="cooking-close-btn"
             onClick={onClose}
             className="rounded-2xl bg-stone-800 p-2 text-stone-400 hover:bg-stone-700 hover:text-white active:scale-95 transition-all ml-1"
             aria-label="조리 모드 나가기"
@@ -532,9 +850,20 @@ export const CookingModeModal: React.FC<CookingModeModalProps> = ({
       {/* Main Content Area */}
       <div className="relative flex flex-1 overflow-hidden">
         {/* Step Focus Canvas */}
-        <main className="flex flex-1 flex-col items-center justify-between p-6 sm:p-12 overflow-y-auto">
+        <main className="flex flex-1 flex-col items-center justify-between p-6 sm:p-12 overflow-y-auto relative">
+          {/* Floating Voice Status Indicator */}
+          <div className="absolute top-4 left-0 right-0 flex justify-center z-10">
+            <VoiceStatusBadge
+              isListening={voiceAssistant.isListening}
+              isSpeaking={voiceAssistant.isSpeaking}
+              lastHeardTranscript={voiceAssistant.lastHeardTranscript}
+              lastExecutionFeedback={voiceAssistant.lastExecutionFeedback}
+              isPendingConfirmation={voiceAssistant.pendingConfirmation === 'COMPLETE'}
+            />
+          </div>
+
           {!isCompleted ? (
-            <div className="flex flex-col items-center text-center max-w-3xl w-full my-auto space-y-8">
+            <div className="flex flex-col items-center text-center max-w-3xl w-full my-auto space-y-8 pt-6">
               {/* Progress Indicator */}
               <div className="flex flex-col items-center space-y-2">
                 <div className="inline-flex items-center gap-2 rounded-full bg-orange-500/20 px-4 py-1.5 border border-orange-500/40">
@@ -550,7 +879,12 @@ export const CookingModeModal: React.FC<CookingModeModalProps> = ({
                     <button
                       key={idx}
                       type="button"
-                      onClick={() => setCurrentStepIndex(idx)}
+                      onClick={() => {
+                        setCurrentStepIndex(idx);
+                        if (voiceAssistant.settings.autoReadNextStep) {
+                          voiceAssistant.speak(`${idx + 1}단계. ${steps[idx]}`);
+                        }
+                      }}
                       className={`h-2.5 rounded-full transition-all ${
                         idx === currentStepIndex
                           ? 'w-8 bg-orange-500'
@@ -559,12 +893,13 @@ export const CookingModeModal: React.FC<CookingModeModalProps> = ({
                           : 'w-2.5 bg-stone-700 hover:bg-stone-500'
                       }`}
                       title={`${idx + 1}단계로 이동`}
+                      aria-label={`${idx + 1}단계`}
                     />
                   ))}
                 </div>
               </div>
 
-              {/* Step Instruction Card (Big Font for Kitchen Stand) */}
+              {/* Step Instruction Card (Kitchen Eye Friendly Large Display) */}
               <div className="rounded-3xl border border-stone-800 bg-stone-900/80 p-8 sm:p-12 shadow-2xl backdrop-blur-md w-full">
                 <p className="font-soft text-2xl font-bold leading-relaxed text-stone-100 sm:text-3xl lg:text-4xl text-balance">
                   {currentStepText}
@@ -589,20 +924,24 @@ export const CookingModeModal: React.FC<CookingModeModalProps> = ({
                 </div>
               )}
 
-              {/* Active Timers Floating Box */}
+              {/* Active Timers Floating Box (Synced with Voice Commands) */}
               {activeTimers.length > 0 && (
                 <div className="w-full rounded-2xl border border-amber-500/40 bg-amber-950/40 p-4 space-y-2">
-                  <div className="flex items-center gap-1.5 text-xs font-black text-amber-400">
-                    <Bell className="h-4 w-4 animate-bounce" />
-                    <span>진행 중인 주방 타이머 ({activeTimers.length}개)</span>
+                  <div className="flex items-center justify-between text-xs font-black text-amber-400">
+                    <div className="flex items-center gap-1.5">
+                      <Bell className="h-4 w-4 animate-bounce" />
+                      <span>진행 중인 주방 타이머 ({activeTimers.length}개)</span>
+                    </div>
+                    <span className="text-[11px] text-amber-400/80 font-normal">
+                      🗣️ "타이머 멈춰", "타이머 얼마 남았어?"
+                    </span>
                   </div>
 
                   <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                     {activeTimers.map((t) => {
-                      const remainingSeconds = Math.max(
-                        0,
-                        Math.ceil((t.targetTimestamp - nowTimestamp) / 1000)
-                      );
+                      const remainingSeconds = t.isPaused
+                        ? t.remainingSecondsOnPause || 0
+                        : Math.max(0, Math.ceil((t.targetTimestamp - nowTimestamp) / 1000));
                       const m = Math.floor(remainingSeconds / 60);
                       const s = remainingSeconds % 60;
                       const timeDisplay = `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
@@ -610,20 +949,49 @@ export const CookingModeModal: React.FC<CookingModeModalProps> = ({
                       return (
                         <div
                           key={t.id}
-                          className="flex items-center justify-between rounded-xl bg-stone-900/90 px-3 py-2 border border-stone-800"
+                          className={`flex items-center justify-between rounded-xl px-3 py-2 border transition-all ${
+                            t.isPaused
+                              ? 'bg-stone-900/60 border-stone-700 opacity-80'
+                              : 'bg-stone-900/90 border-stone-800'
+                          }`}
                         >
                           <div className="flex items-center gap-2">
-                            <Timer className="h-4 w-4 text-amber-400 animate-spin" />
-                            <span className="text-xs font-bold text-stone-200">{t.label}</span>
+                            <Timer
+                              className={`h-4 w-4 ${
+                                t.isPaused ? 'text-stone-400' : 'text-amber-400 animate-spin'
+                              }`}
+                            />
+                            <div className="flex flex-col text-left">
+                              <span className="text-xs font-bold text-stone-200">{t.label}</span>
+                              {t.isPaused && (
+                                <span className="text-[10px] text-amber-400 font-bold">일시정지됨</span>
+                              )}
+                            </div>
                           </div>
-                          <div className="flex items-center gap-3">
+                          <div className="flex items-center gap-2">
                             <span className="font-mono text-base font-black text-amber-300">
                               {timeDisplay}
                             </span>
+                            {/* Pause / Resume Button */}
+                            <button
+                              type="button"
+                              onClick={() =>
+                                t.isPaused ? handleResumeTimer(t.id) : handlePauseTimer(t.id)
+                              }
+                              className="rounded-lg bg-stone-800 p-1.5 text-stone-300 hover:text-white hover:bg-stone-700"
+                              title={t.isPaused ? '재개' : '일시정지'}
+                            >
+                              {t.isPaused ? (
+                                <Play className="h-3.5 w-3.5 text-emerald-400" />
+                              ) : (
+                                <Pause className="h-3.5 w-3.5 text-amber-400" />
+                              )}
+                            </button>
+                            {/* Delete Button */}
                             <button
                               type="button"
                               onClick={() => handleDeleteTimer(t.id)}
-                              className="text-stone-500 hover:text-rose-400"
+                              className="rounded-lg bg-stone-800 p-1.5 text-stone-400 hover:text-rose-400 hover:bg-stone-700"
                               title="삭제"
                             >
                               <Trash2 className="h-3.5 w-3.5" />
@@ -661,6 +1029,7 @@ export const CookingModeModal: React.FC<CookingModeModalProps> = ({
 
               <button
                 type="button"
+                id="cooking-complete-close-btn"
                 onClick={onClose}
                 className="rounded-2xl bg-orange-500 px-8 py-3.5 font-soft text-sm font-bold text-white shadow-xl shadow-orange-500/30 hover:bg-orange-600 active:scale-95 transition-all"
               >
@@ -681,6 +1050,7 @@ export const CookingModeModal: React.FC<CookingModeModalProps> = ({
                 type="button"
                 onClick={() => setShowIngredientsSidebar(false)}
                 className="rounded-lg p-1 text-stone-400 hover:text-white"
+                aria-label="재료 사이드바 닫기"
               >
                 <X className="h-4 w-4" />
               </button>
@@ -705,29 +1075,63 @@ export const CookingModeModal: React.FC<CookingModeModalProps> = ({
         <footer className="flex h-20 shrink-0 items-center justify-between border-t border-stone-800 bg-stone-900/90 px-6 sm:px-12 backdrop-blur-md">
           <button
             type="button"
-            onClick={handlePrevStep}
+            id="cooking-prev-step-btn"
+            onClick={() =>
+              handlePrevStep((prevIdx, stepText) => {
+                if (voiceAssistant.settings.autoReadNextStep) {
+                  voiceAssistant.speak(`${prevIdx + 1}단계. ${stepText}`);
+                }
+              })
+            }
             disabled={currentStepIndex === 0}
             className="flex items-center gap-2 rounded-2xl bg-stone-800 px-5 py-3 font-soft text-sm font-bold text-stone-200 hover:bg-stone-700 active:scale-95 disabled:opacity-30 disabled:pointer-events-none transition-all"
+            aria-label="이전 단계로 이동"
           >
             <ChevronLeft className="h-5 w-5" />
             <span>이전 단계</span>
           </button>
 
-          {/* Quick Step Checklist Toggle */}
-          <div className="hidden sm:flex items-center gap-2 text-xs text-stone-400">
+          {/* Quick Step Checklist Status & Hands-free hint */}
+          <div className="hidden sm:flex flex-col items-center text-xs text-stone-400">
             <span>완료 단계: {completedSteps.length} / {totalSteps}</span>
+            <span className="text-[11px] text-stone-500">
+              🗣️ "다음", "재료 읽어줘", "5분 타이머"
+            </span>
           </div>
 
           <button
             type="button"
-            onClick={handleNextStep}
+            id="cooking-next-step-btn"
+            onClick={() =>
+              handleNextStep((nextIdx, stepText) => {
+                if (voiceAssistant.settings.autoReadNextStep) {
+                  voiceAssistant.speak(`${nextIdx + 1}단계. ${stepText}`);
+                }
+              })
+            }
             className="flex items-center gap-2 rounded-2xl bg-gradient-to-r from-orange-500 to-amber-500 px-6 py-3 font-soft text-sm font-black text-white shadow-lg shadow-orange-500/20 hover:from-orange-600 hover:to-amber-600 active:scale-95 transition-all"
+            aria-label={currentStepIndex === totalSteps - 1 ? '요리 완료' : '다음 단계로 이동'}
           >
             <span>{currentStepIndex === totalSteps - 1 ? '요리 완료' : '다음 단계'}</span>
             <ChevronRight className="h-5 w-5" />
           </button>
         </footer>
       )}
+
+      {/* Voice Assistant Help Modal */}
+      <VoiceAssistantHelpModal
+        isOpen={voiceAssistant.showHelpModal}
+        onClose={() => voiceAssistant.setShowHelpModal(false)}
+        settings={voiceAssistant.settings}
+        onUpdateSettings={voiceAssistant.updateSettings}
+        isSupported={voiceAssistant.isSupported}
+      />
+
+      {/* First-time Kitchen Voice Onboarding Modal */}
+      <VoiceIntroModal
+        isOpen={voiceAssistant.showIntroModal}
+        onConfirm={voiceAssistant.markIntroSeen}
+      />
     </div>
   );
 };

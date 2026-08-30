@@ -63,6 +63,26 @@ function parseFraction(fracStr: string): number | null {
  * @param value 숫자 값
  * @returns 가독성 높은 수량 문자열 (예: 0.5 -> "1/2", 1.5 -> "1.5" 또는 "1 1/2")
  */
+/**
+ * 숫자를 깔끔한 분수 또는 소수점 문자열로 포맷팅합니다.
+ * @param value 숫자 값
+ * @returns 가독성 높은 수량 문자열 (예: 0.5 -> "1/2", 1.5 -> "1.5" 또는 "1 1/2")
+ */
+export function formatQuantityNumber(value: number): string {
+  return formatNumberNicely(value);
+}
+
+/**
+ * 단일 수량에 배율을 적용하여 포맷팅된 문자열을 반환합니다.
+ * @param quantity 원본 수량
+ * @param multiplier 인분 배율
+ * @returns 스케일링된 수량 문자열
+ */
+export function scaleSingleQuantity(quantity: number, multiplier: number): string {
+  if (isNaN(quantity)) return '0';
+  return formatNumberNicely(quantity * multiplier);
+}
+
 function formatNumberNicely(value: number): string {
   logger.debug('scaler.formatNumberNicely', `숫자 포맷팅: ${value}`);
   if (Math.abs(value - 0.5) < 0.01) return '1/2';

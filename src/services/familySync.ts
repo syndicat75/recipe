@@ -296,14 +296,27 @@ export async function joinFamilyByInviteCode(
       throw new Error('더 이상 사용할 수 없는 초대 코드입니다.');
     }
 
+    if (inviteData.expiresAt && Date.now() > inviteData.expiresAt) {
+      logger.warn('familySync.joinFamilyByInviteCode', `만료된 초대 코드: ${inviteCode}`);
+      throw new Error('초대 코드 유효기간이 만료되었습니다. 가족 대표에게 새 코드를 요청해주세요.');
+    }
+
     const familyId = inviteData.familyId;
     const familyName = inviteData.familyName;
 
-    // 2. 가족 공간 활성 상태 확인
+    // 2. 가족 공간 활성 상태 및 인원수 확인
     const familyDocRef = doc(db, 'families', familyId);
     const familySnap = await getDoc(familyDocRef);
     if (!familySnap.exists() || (familySnap.data() as FamilySpaceDoc).status === 'deleted') {
       throw new Error('해당 가족 공간을 찾을 수 없거나 이미 삭제되었습니다.');
+    }
+
+    // 인원수 제한 검사 (최대 20명)
+    const membersSnap = await getDocs(collection(db, 'families', familyId, 'members'));
+    const MAX_MEMBERS = 20;
+    const isAlreadyMember = membersSnap.docs.some((d) => d.id === uid);
+    if (!isAlreadyMember && membersSnap.size >= MAX_MEMBERS) {
+      throw new Error(`가족 공간 최대 정원(${MAX_MEMBERS}명)이 초과되어 참여할 수 없습니다.`);
     }
 
     const now = Date.now();

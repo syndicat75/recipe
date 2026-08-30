@@ -35,6 +35,10 @@ export const APP_CONFIG = {
     familyProfile: 'my_recipe_family_profile_v1',
     /** 가족 공간 캐시 키 */
     familySpaces: 'my_recipe_family_spaces_v1',
+    /** 음성비서 환경설정 (자동읽기, 타이머 음성안내, 음성속도) 키 */
+    voiceAssistantSettings: 'my_recipe_voice_assistant_settings_v1',
+    /** 음성비서 최초 안내 확인 여부 키 */
+    voiceAssistantIntroSeen: 'my_recipe_voice_intro_seen_v1',
   },
   ai: {
     model: 'gemini-3.7-flash',
@@ -42,6 +46,7 @@ export const APP_CONFIG = {
     importImageEndpoint: '/api/ai/import-recipe-image',
     askEndpoint: '/api/ai/ask-recipe',
     recommendEndpoint: '/api/ai/recommend-menu',
+    generateMealPlanEndpoint: '/api/ai/generate-meal-plan',
     analyzeCaloriesEndpoint: '/api/ai/analyze-calories',
     quickQuestions: [
       { id: 'substitute', label: '🥬 대체 재료', prompt: '대체할 수 있는 다른 재료나 양념이 있나요?' },

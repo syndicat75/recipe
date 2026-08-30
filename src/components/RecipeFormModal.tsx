@@ -20,6 +20,7 @@ import {
 import { APP_CONFIG, DEFAULT_CATEGORY_DOCS, FALLBACK_CATEGORY } from '../config/appConfig';
 import { Recipe, RecipeCategory, RecipeCategoryDoc, SaveRecipeResult } from '../types/recipe';
 import { logger } from '../utils/logger';
+import { uploadRecipeImage, isBase64Image } from '../services/imageStorage';
 
 interface RecipeFormModalProps {
   /** 모달 열림 여부 */
@@ -238,12 +239,29 @@ export const RecipeFormModal: React.FC<RecipeFormModalProps> = ({
     const parsedCalories = caloriesPerServing.trim() ? Number(caloriesPerServing) : undefined;
     const validCalories = parsedCalories && !isNaN(parsedCalories) && parsedCalories > 0 ? Math.round(parsedCalories) : undefined;
 
+    setIsSaving(true);
+
+    let processedImageUrl = imageUrl.trim();
+    if (isBase64Image(processedImageUrl)) {
+      try {
+        const storageUrl = await uploadRecipeImage(processedImageUrl, {
+          recipeId: targetId,
+          fileNamePrefix: `recipe_${targetId}`,
+        });
+        if (storageUrl) {
+          processedImageUrl = storageUrl;
+        }
+      } catch (uploadErr) {
+        logger.warn('RecipeFormModal.handleSubmit', '이미지 Storage 업로드 경고 (원본 유지):', uploadErr);
+      }
+    }
+
     const recipeData: Recipe = {
       id: targetId,
       name: name.trim(),
       category,
       icon: icon || '🍳',
-      ...(imageUrl.trim() ? { imageUrl: imageUrl.trim() } : {}),
+      ...(processedImageUrl ? { imageUrl: processedImageUrl } : {}),
       ingredients: ingredients.trim(),
       method: method.trim() || '-',
       ingredientCount: ingLines.length,
@@ -275,7 +293,6 @@ export const RecipeFormModal: React.FC<RecipeFormModalProps> = ({
       updatedAt: Date.now(),
     };
 
-    setIsSaving(true);
     try {
       const result = await onSaveRecipe(recipeData, isBookmarked, userNote.trim());
 

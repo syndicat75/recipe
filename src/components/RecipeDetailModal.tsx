@@ -35,6 +35,7 @@ import { APP_CONFIG, CATEGORY_CONFIG } from '../config/appConfig';
 import { Recipe } from '../types/recipe';
 import { getScaledIngredientsList, calculateServingsMultiplier } from '../utils/scaler';
 import { logger } from '../utils/logger';
+import { NutritionInfoCard } from './NutritionInfoCard';
 
 interface RecipeDetailModalProps {
   /** 표시할 레시피 데이터 (null이면 미표시) */
@@ -406,40 +407,8 @@ ${userNote ? `\n[📝 나의 메모]\n${userNote}` : ''}`;
             </div>
           </div>
 
-          {/* Calorie Detailed Card (If analyzed) */}
-          {recipe.caloriesPerServing && recipe.caloriesPerServing > 0 && (
-            <div className="rounded-2xl border border-amber-200 bg-gradient-to-r from-amber-50/90 via-orange-50/80 to-amber-50/90 p-4 shadow-xs">
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <div className="grid h-8 w-8 place-items-center rounded-xl bg-amber-500 text-white shadow-xs">
-                    🔥
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="font-soft text-sm font-black text-amber-950">
-                        1인분 예상 칼로리
-                      </span>
-                      <span className="text-base font-black text-amber-700">
-                        {recipe.caloriesPerServing} <span className="text-xs font-normal">kcal</span>
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-amber-800/80">
-                      현재 <span className="font-bold text-amber-900">{currentServings}인분</span> 기준 총 예상 열량: 약 <span className="font-black text-amber-950">{Math.round(recipe.caloriesPerServing * currentServings)} kcal</span>
-                    </p>
-                  </div>
-                </div>
-
-                <div className="text-right text-[11px] text-amber-700/70 sm:self-center">
-                  <span>※ 재료·분량 기반 추정치 (의료·영양 측정값 아님)</span>
-                  {recipe.calorieBreakdown && (
-                    <div className="mt-0.5 text-stone-600 font-medium">
-                      {recipe.calorieBreakdown}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
+          {/* 1인분 예상 영양정보 카드 */}
+          <NutritionInfoCard recipe={recipe} currentServings={currentServings} />
 
           {/* Source Image View (If applicable) */}
           {showSourceImage && recipe.sourceImageUrl && (

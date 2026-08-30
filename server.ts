@@ -14,6 +14,7 @@ import {
   importRecipeFromImage,
   askChefAboutRecipe,
   recommendMenuFromCandidates,
+  generateWeeklyMealPlan,
   analyzeRecipeCalories,
   getGeminiClient,
 } from './lib/geminiService.js';
@@ -198,6 +199,44 @@ async function startServer(): Promise<void> {
       res.status(500).json({
         success: false,
         error: 'AI 메뉴 추천 중 오류가 발생했습니다.',
+        details: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  /**
+   * AI 주간 식단표 자동 생성 엔드포인트
+   */
+  app.post('/api/ai/generate-meal-plan', async (req: Request, res: Response): Promise<void> => {
+    res.setHeader('Content-Type', 'application/json');
+    try {
+      const { config, candidateRecipes, recentMealRecipeIds, requestId } = req.body;
+      if (!config || !Array.isArray(config.dates) || config.dates.length === 0) {
+        res.status(400).json({ success: false, error: '식단을 생성할 날짜 목록(dates)이 필요합니다.' });
+        return;
+      }
+      if (!candidateRecipes || candidateRecipes.length === 0) {
+        res.status(400).json({ success: false, error: '식단에 사용할 후보 레시피가 없습니다.' });
+        return;
+      }
+
+      const result = await generateWeeklyMealPlan({
+        config,
+        candidateRecipes,
+        recentMealRecipeIds,
+        requestId,
+      });
+
+      if (!result.success) {
+        res.status(500).json(result);
+        return;
+      }
+      res.status(200).json(result);
+    } catch (error) {
+      console.error('Error in /api/ai/generate-meal-plan:', error);
+      res.status(500).json({
+        success: false,
+        error: 'AI 주간 식단 생성 중 오류가 발생했습니다.',
         details: error instanceof Error ? error.message : String(error),
       });
     }

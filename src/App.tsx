@@ -35,6 +35,7 @@ import { Header } from './components/Header';
 import { HeroSection } from './components/HeroSection';
 import { RecentRecipes } from './components/RecentRecipes';
 import { SearchBar } from './components/SearchBar';
+import { NutritionFilterBar } from './components/NutritionFilterBar';
 import { CategoryFilter } from './components/CategoryFilter';
 import { RecipeList } from './components/RecipeList';
 import { RecipeDetailModal } from './components/RecipeDetailModal';
@@ -151,7 +152,7 @@ export default function App(): React.JSX.Element {
     setWeeklyMealPlan,
     savePlan: handleSaveWeeklyMealPlan,
     addRecipeToMealPlan: handleAddRecipeToMealPlan,
-  } = useMealPlan({ showToast });
+  } = useMealPlan({ showToast, userId: user?.uid });
 
   // 10. Dynamic Category Management Hook (Firestore 실시간 동기화 & 단일 진실 공급원)
   const {
@@ -170,6 +171,9 @@ export default function App(): React.JSX.Element {
     setActiveCategory,
     searchQuery,
     setSearchQuery,
+    nutritionFilter,
+    setNutritionFilter,
+    resetNutritionFilter,
     sortOption,
     setSortOption,
     categoryCounts,
@@ -639,12 +643,18 @@ export default function App(): React.JSX.Element {
                 bookmarkCount={bookmarkedIds.length}
               />
 
-              {/* Search and Sort Toolbar */}
-              <div className="mt-8">
+              {/* Search and Nutrition Filter Toolbar */}
+              <div className="mt-8 space-y-3">
                 <SearchBar
                   searchQuery={searchQuery}
                   onSearchChange={setSearchQuery}
                   onSelectTag={(tag) => setSearchQuery(tag)}
+                />
+                <NutritionFilterBar
+                  filter={nutritionFilter}
+                  onFilterChange={setNutritionFilter}
+                  onResetFilter={resetNutritionFilter}
+                  filteredCount={filteredAndSortedRecipes.length}
                 />
               </div>
 
@@ -663,6 +673,7 @@ export default function App(): React.JSX.Element {
                   onResetFilters={() => {
                     setActiveCategory('전체');
                     setSearchQuery('');
+                    resetNutritionFilter();
                   }}
                   onOpenAddRecipe={() => {
                     setRecipeToEdit(null);

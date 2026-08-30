@@ -162,8 +162,8 @@ export const RecipeCard: React.FC<RecipeCardProps> = ({
               {recipe.name}
             </h3>
 
-            {/* Meta Info (Time & Difficulty & Calories) */}
-            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-stone-500">
+            {/* Meta Info (Time & Difficulty & Calories & Nutrition) */}
+            <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-stone-500">
               {recipe.caloriesPerServing && recipe.caloriesPerServing > 0 ? (
                 <span className="inline-flex items-center gap-1 rounded-lg bg-amber-50 border border-amber-200/80 px-2 py-0.5 text-xs font-extrabold text-amber-900 shadow-2xs">
                   <span className="text-orange-500">🔥</span>
@@ -175,6 +175,18 @@ export const RecipeCard: React.FC<RecipeCardProps> = ({
                   🔥 미분석
                 </span>
               ) : null}
+
+              {recipe.nutrition?.vegetableLevel === 'high' && (
+                <span className="inline-flex items-center rounded-lg bg-emerald-50 border border-emerald-200/60 px-1.5 py-0.5 text-[10px] font-bold text-emerald-800" title="채소가 풍부한 메뉴">
+                  🥦 채소풍부
+                </span>
+              )}
+
+              {recipe.nutrition?.protein && recipe.nutrition.protein >= 25 && (
+                <span className="inline-flex items-center rounded-lg bg-amber-100/70 px-1.5 py-0.5 text-[10px] font-bold text-amber-900" title={`1인분 단백질 ${recipe.nutrition.protein}g`}>
+                  🥩 단백질 {recipe.nutrition.protein}g
+                </span>
+              )}
 
               {recipe.cookingTimeMinutes && (
                 <span className="flex items-center gap-1">

@@ -22,6 +22,38 @@ export function getRecipeTimestamp(val?: number | string): number {
 }
 
 /**
+ * 로컬 레시피와 클라우드 레시피를 ID 기준으로 스마트 병합
+ */
+export function mergeRecipeLists(localRecipes: Recipe[], cloudRecipes: Recipe[]): Recipe[] {
+  logger.info(
+    'recipeMerger.mergeRecipeLists',
+    `레시피 목록 병합 (로컬: ${localRecipes.length}개, 클라우드: ${cloudRecipes.length}개)`
+  );
+
+  const recipeMap = new Map<number, Recipe>();
+
+  cloudRecipes.forEach((recipe) => {
+    recipeMap.set(recipe.id, recipe);
+  });
+
+  localRecipes.forEach((local) => {
+    const existing = recipeMap.get(local.id);
+    if (!existing) {
+      recipeMap.set(local.id, local);
+    } else {
+      const localUpdated = getRecipeTimestamp(local.updatedAt || local.createdAt);
+      const existingUpdated = getRecipeTimestamp(existing.updatedAt || existing.createdAt);
+
+      if (localUpdated > existingUpdated) {
+        recipeMap.set(local.id, { ...existing, ...local });
+      }
+    }
+  });
+
+  return Array.from(recipeMap.values());
+}
+
+/**
  * 공개(/recipes), 개인(/users/{uid}/recipes), 로컬(localStorage) 3단계 레시피 목록을
  * ID 기준으로 안전하게 병합합니다.
  * 

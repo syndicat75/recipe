@@ -1,11 +1,14 @@
 /**
  * @file src/hooks/useRecipeFilter.ts
- * @description 레시피 목록의 카테고리 필터링, 실시간 검색, 다중 정렬 및 카테고리별 개수 계산 훅.
+ * @description 레시피 목록의 카테고리 필터링, 실시간 검색, 영양성분 조건 필터링(칼로리, 단백질, 나트륨, 식이섬유, 채소 비중),
+ * 다중 정렬 및 카테고리별 개수 계산 훅.
  */
 
-import { useState, useMemo } from 'react';
-import { Recipe, FilterCategory, SortOption, RecipeCategoryDoc } from '../types/recipe';
+import { useState, useMemo, useCallback } from 'react';
+import { Recipe, FilterCategory, SortOption, RecipeCategoryDoc, NutritionFilterState } from '../types/recipe';
 import { CATEGORY_LIST } from '../config/appConfig';
+import { matchesNutritionFilter, getEffectiveNutrition, isVegetableRich } from '../utils/nutritionCalculator';
+import { logger } from '../utils/logger';
 
 export interface UseRecipeFilterOptions {
   /** 전체 레시피 목록 */
@@ -27,6 +30,12 @@ export interface UseRecipeFilterReturn {
   searchQuery: string;
   /** 검색어 변경자 */
   setSearchQuery: React.Dispatch<React.SetStateAction<string>>;
+  /** 영양 성분 필터 상태 */
+  nutritionFilter: NutritionFilterState;
+  /** 영양 성분 필터 변경자 */
+  setNutritionFilter: React.Dispatch<React.SetStateAction<NutritionFilterState>>;
+  /** 영양 성분 필터 초기화 */
+  resetNutritionFilter: () => void;
   /** 현재 정렬 옵션 */
   sortOption: SortOption;
   /** 정렬 옵션 변경자 */
@@ -38,8 +47,19 @@ export interface UseRecipeFilterReturn {
 }
 
 /**
+ * 초기 영양 필터 상태
+ */
+const initialNutritionFilter: NutritionFilterState = {
+  maxCalories: undefined,
+  minProtein: undefined,
+  maxSodium: undefined,
+  minFiber: undefined,
+  vegetableRichOnly: false,
+};
+
+/**
  * 레시피 필터 및 검색 정렬 훅
- * @param options { recipes, bookmarkedIds, userNotes }
+ * @param options { recipes, bookmarkedIds, userNotes, categories }
  */
 export function useRecipeFilter({
   recipes,
@@ -49,7 +69,16 @@ export function useRecipeFilter({
 }: UseRecipeFilterOptions): UseRecipeFilterReturn {
   const [activeCategory, setActiveCategory] = useState<FilterCategory>('전체');
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [nutritionFilter, setNutritionFilter] = useState<NutritionFilterState>(initialNutritionFilter);
   const [sortOption, setSortOption] = useState<SortOption>('default');
+
+  /**
+   * 영양 필터만 초기화하는 함수
+   */
+  const resetNutritionFilter = useCallback(() => {
+    logger.info('useRecipeFilter.resetNutritionFilter', '영양 필터 초기화');
+    setNutritionFilter(initialNutritionFilter);
+  }, []);
 
   // 카테고리별 개수 맵 계산 (동적 카테고리 + 기본 카테고리 + 실제 레시피에 존재하는 모든 카테고리 통합)
   const categoryCounts = useMemo((): Record<string, number> => {
@@ -76,7 +105,7 @@ export function useRecipeFilter({
     return counts;
   }, [recipes, categories]);
 
-  // 검색 및 필터링, 정렬 적용된 레시피 목록 계산
+  // 검색, 카테고리, 영양 필터링 및 정렬 적용된 레시피 목록 계산
   const filteredAndSortedRecipes = useMemo((): Recipe[] => {
     const q = searchQuery.trim().toLowerCase();
 
@@ -95,10 +124,15 @@ export function useRecipeFilter({
         if (!fullText.includes(q)) return false;
       }
 
+      // 3. 영양 성분 필터 (최대 칼로리, 최소 단백질, 최대 나트륨, 최소 식이섬유, 채소 많은 메뉴)
+      if (!matchesNutritionFilter(r, nutritionFilter)) {
+        return false;
+      }
+
       return true;
     });
 
-    // 3. 정렬 적용
+    // 4. 정렬 적용
     return [...filtered].sort((a, b) => {
       if (sortOption === 'nameAsc') return a.name.localeCompare(b.name, 'ko');
       if (sortOption === 'nameDesc') return b.name.localeCompare(a.name, 'ko');
@@ -115,6 +149,8 @@ export function useRecipeFilter({
       }
       if (sortOption === 'ingredientsAsc') return a.ingredientCount - b.ingredientCount;
       if (sortOption === 'ingredientsDesc') return b.ingredientCount - a.ingredientCount;
+
+      // 칼로리 정렬 (1인분 기준)
       if (sortOption === 'caloriesAsc') {
         const calA = a.caloriesPerServing && a.caloriesPerServing > 0 ? a.caloriesPerServing : 999999;
         const calB = b.caloriesPerServing && b.caloriesPerServing > 0 ? b.caloriesPerServing : 999999;
@@ -125,15 +161,40 @@ export function useRecipeFilter({
         const calB = b.caloriesPerServing && b.caloriesPerServing > 0 ? b.caloriesPerServing : -1;
         return calB - calA;
       }
+
+      // 단백질 높은 순 (1인분 기준)
+      if (sortOption === 'proteinDesc') {
+        const pA = a.nutrition?.protein || 0;
+        const pB = b.nutrition?.protein || 0;
+        return pB - pA;
+      }
+
+      // 나트륨 낮은 순 (1인분 기준)
+      if (sortOption === 'sodiumAsc') {
+        const sA = a.nutrition?.sodium ?? 999999;
+        const sB = b.nutrition?.sodium ?? 999999;
+        return sA - sB;
+      }
+
+      // 식이섬유 높은 순 (1인분 기준)
+      if (sortOption === 'fiberDesc') {
+        const fA = a.nutrition?.fiber || 0;
+        const fB = b.nutrition?.fiber || 0;
+        return fB - fA;
+      }
+
       return 0;
     });
-  }, [recipes, activeCategory, searchQuery, bookmarkedIds, sortOption, userNotes]);
+  }, [recipes, activeCategory, searchQuery, nutritionFilter, bookmarkedIds, sortOption, userNotes]);
 
   return {
     activeCategory,
     setActiveCategory,
     searchQuery,
     setSearchQuery,
+    nutritionFilter,
+    setNutritionFilter,
+    resetNutritionFilter,
     sortOption,
     setSortOption,
     categoryCounts,

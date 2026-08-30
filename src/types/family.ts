@@ -121,6 +121,8 @@ export interface FamilyInviteDoc {
   ownerId: string;
   /** 초대 코드 활성화 여부 */
   active: boolean;
+  /** 만료 시각 (타임스탬프 ms, 선택) */
+  expiresAt?: number;
   /** 생성 시각 (타임스탬프 ms) */
   createdAt: number;
 }

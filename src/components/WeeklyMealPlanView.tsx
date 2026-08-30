@@ -26,6 +26,7 @@ import {
 import { Recipe, MealPlanEntry, MealSlotType, FilterCategory } from '../types/recipe';
 import { CATEGORY_LIST } from '../config/appConfig';
 import { getScaledIngredientsList, calculateServingsMultiplier } from '../utils/scaler';
+import { AiMealPlanModal } from './AiMealPlanModal';
 import { logger } from '../utils/logger';
 
 interface WeeklyMealPlanViewProps {
@@ -107,6 +108,7 @@ export const WeeklyMealPlanView: React.FC<WeeklyMealPlanViewProps> = ({
   const safeMealPlan = mealPlan || {};
   const [currentWeekBase, setCurrentWeekBase] = useState<Date>(() => new Date());
   const [viewMode, setViewMode] = useState<ViewMode>('single');
+  const [isAiMealPlanModalOpen, setIsAiMealPlanModalOpen] = useState<boolean>(false);
 
   // 레시피 선택 모달 상태
   const [selectingSlot, setSelectingSlot] = useState<{
@@ -308,11 +310,20 @@ export const WeeklyMealPlanView: React.FC<WeeklyMealPlanViewProps> = ({
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
+              onClick={() => setIsAiMealPlanModalOpen(true)}
+              className="flex items-center gap-1.5 rounded-2xl bg-gradient-to-r from-orange-500 via-amber-500 to-yellow-500 px-4 py-2 font-soft text-xs font-bold text-white shadow-md shadow-orange-500/25 hover:from-orange-600 hover:via-amber-600 hover:to-yellow-600 active:scale-95 transition-all"
+            >
+              <Sparkles className="h-4 w-4" />
+              <span>✨ AI 식단 만들기</span>
+            </button>
+
+            <button
+              type="button"
               onClick={onOpenTodayMenuModal}
               className="flex items-center gap-1.5 rounded-2xl border border-orange-200 bg-white px-3.5 py-2 font-soft text-xs font-bold text-orange-800 shadow-sm hover:bg-orange-50 active:scale-95 transition-all"
             >
               <Dice5 className="h-4 w-4 text-orange-500" />
-              <span>오늘 뭐 먹지? 추천</span>
+              <span>오늘 뭐 먹지?</span>
             </button>
 
             <button
@@ -321,7 +332,7 @@ export const WeeklyMealPlanView: React.FC<WeeklyMealPlanViewProps> = ({
               className="flex items-center gap-1.5 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 px-4 py-2 font-soft text-xs font-bold text-white shadow-md shadow-emerald-600/20 hover:from-emerald-700 hover:to-teal-700 active:scale-95 transition-all"
             >
               <ShoppingCart className="h-4 w-4" />
-              <span>🛒 이번 주 장보기 만들기</span>
+              <span>🛒 이번 주 장보기</span>
             </button>
 
             <button
@@ -660,6 +671,20 @@ export const WeeklyMealPlanView: React.FC<WeeklyMealPlanViewProps> = ({
           </div>
         </div>
       )}
+
+      {/* AI 주간 식단 만들기 모달 */}
+      <AiMealPlanModal
+        isOpen={isAiMealPlanModalOpen}
+        onClose={() => setIsAiMealPlanModalOpen(false)}
+        allRecipes={allRecipes}
+        mealPlan={safeMealPlan}
+        currentWeekDates={dates}
+        currentViewMode={viewMode}
+        onApplyMealPlan={(newPlan) => {
+          onSaveMealPlan(newPlan);
+        }}
+        showToast={showToast}
+      />
     </div>
   );
 };
