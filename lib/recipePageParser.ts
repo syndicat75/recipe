@@ -2,7 +2,8 @@
  * @file lib/recipePageParser.ts
  * @description 웹페이지 URL에서 schema.org/Recipe 구조화 데이터(JSON-LD) 및 본문 레시피를
  * 안전하고 빠르게 추출하는 전문 파서.
- * SSRF 방어, 6초 타임아웃, 광고/메뉴/스크립트 제거 및 토큰 최적화 fallback을 제공합니다.
+ * 추적 쿼리 파라미터(srsltid 등) 제거, SSRF 방어, 5초 타임아웃, JSON-LD Direct 변환(AI 0회 호출) 및
+ * 누락 시 HTML Fallback 정제 기능을 제공합니다.
  */
 
 import { URL } from 'url';
@@ -19,6 +20,19 @@ export interface ParsedJsonLdRecipe {
   imageUrl?: string;
 }
 
+export interface ImportedRecipeData {
+  name: string;
+  category: string;
+  icon: string;
+  baseServings: number;
+  ingredients: string;
+  method: string;
+  cookingTimeMinutes: number;
+  difficulty: '쉬움' | '보통' | '어려움';
+  tips?: string;
+  imageUrl?: string;
+}
+
 export interface RecipePageParseResult {
   success: boolean;
   sourceType: 'jsonld' | 'html' | 'failed';
@@ -32,6 +46,187 @@ export interface RecipePageParseResult {
   errorMessage?: string;
   isBlockedOrForbidden?: boolean;
 }
+
+/**
+ * 기본 카테고리별 대표 이모지 매핑 테이블
+ */
+export const CATEGORY_ICON_MAP: Record<string, string> = {
+  '반찬': '🥗',
+  '소스·양념': '🧂',
+  '국·찌개': '🍲',
+  '중식·양식': '🍝',
+  '밥·한그릇': '🍚',
+  '계란요리': '🍳',
+  '면·국수': '🍜',
+  '고기요리': '🥩',
+  '디저트': '🍰',
+  '기타': '🍽️',
+};
+
+/**
+ * URL에서 마케팅/추적용 Query Parameter(srsltid, utm_*, gclid, fbclid 등)를 안전하게 제거합니다.
+ * 실제 웹페이지나 레시피 ID를 식별하는 핵심 파라미터는 엄격히 보존합니다.
+ * @param rawUrl 원본 URL 문자열
+ * @returns 추적 파라미터가 제거된 URL 문자열
+ */
+export function stripTrackingParams(rawUrl: string): string {
+  if (!rawUrl || typeof rawUrl !== 'string') return rawUrl;
+  try {
+    const trimmed = rawUrl.trim();
+    const urlObj = new URL(trimmed);
+    const trackingKeys = [
+      'srsltid',
+      'utm_source',
+      'utm_medium',
+      'utm_campaign',
+      'utm_content',
+      'utm_term',
+      'gclid',
+      'fbclid',
+      'ncid',
+      '_hsenc',
+      '_hsmi',
+      'mc_cid',
+      'mc_eid',
+      'ref',
+      'ad_id',
+      'source',
+      'affiliate',
+    ];
+
+    let changed = false;
+    for (const key of trackingKeys) {
+      if (urlObj.searchParams.has(key)) {
+        urlObj.searchParams.delete(key);
+        changed = true;
+      }
+    }
+
+    return changed ? urlObj.toString() : trimmed;
+  } catch {
+    return rawUrl.trim();
+  }
+}
+
+/**
+ * 추출된 JSON-LD 레시피가 Gemini AI 재분석 없이 즉시 사용 가능한 충분한 필수 정보를 갖추었는지 검증합니다.
+ * 최소 조건: name 존재 && ingredients 1개 이상 && instructions 1개 이상
+ * @param recipe JSON-LD 레시피 객체
+ * @returns 충분성 여부 (boolean)
+ */
+export function isSufficientJsonLdRecipe(recipe?: ParsedJsonLdRecipe | null): boolean {
+  if (!recipe) return false;
+  const hasName = Boolean(recipe.name && recipe.name.trim().length > 0);
+  const hasIngredients = Boolean(
+    Array.isArray(recipe.ingredients) &&
+      recipe.ingredients.length > 0 &&
+      recipe.ingredients.some((i) => i && i.trim().length > 0)
+  );
+  const hasInstructions = Boolean(
+    Array.isArray(recipe.instructions) &&
+      recipe.instructions.length > 0 &&
+      recipe.instructions.some((s) => s && s.trim().length > 0)
+  );
+
+  return hasName && hasIngredients && hasInstructions;
+}
+
+/**
+ * JSON-LD schema.org/Recipe 데이터를 Gemini AI 호출 없이 앱의 표준 레시피 데이터 구조로 직접 변환(normalize)합니다.
+ * @param jsonLdRecipe 파싱된 JSON-LD 레시피 객체
+ * @param availableCategories 동적 카테고리 목록 (문자열 배열 또는 객체 배열)
+ * @returns 앱 표준 형태의 ImportedRecipeData
+ */
+export function normalizeJsonLdToRecipe(
+  jsonLdRecipe: ParsedJsonLdRecipe,
+  availableCategories?: (string | { name: string; icon?: string })[]
+): ImportedRecipeData {
+  // 1. 이름
+  const name = (jsonLdRecipe.name && jsonLdRecipe.name.trim()) || '새 레시피';
+
+  // 2. 카테고리 매칭 및 이모지 아이콘 매핑
+  let category = '기타';
+  let icon = '🍽️';
+
+  const categoryDocs: { name: string; icon?: string }[] = [];
+  if (Array.isArray(availableCategories)) {
+    for (const item of availableCategories) {
+      if (typeof item === 'string') {
+        categoryDocs.push({ name: item });
+      } else if (item && typeof item === 'object' && 'name' in item) {
+        categoryDocs.push(item);
+      }
+    }
+  }
+
+  const rawCat = jsonLdRecipe.category?.trim();
+  if (rawCat) {
+    const matched = categoryDocs.find(
+      (c) => c.name.toLowerCase() === rawCat.toLowerCase() || rawCat.toLowerCase().includes(c.name.toLowerCase())
+    );
+    if (matched) {
+      category = matched.name;
+      icon = matched.icon || CATEGORY_ICON_MAP[matched.name] || '🍽️';
+    } else if (CATEGORY_ICON_MAP[rawCat]) {
+      category = rawCat;
+      icon = CATEGORY_ICON_MAP[rawCat];
+    }
+  }
+
+  // 3. 인분수: JSON-LD 명시값 최우선 (1인분이면 반드시 1), 없으면 1
+  const baseServings =
+    typeof jsonLdRecipe.servings === 'number' && jsonLdRecipe.servings >= 1
+      ? Math.round(jsonLdRecipe.servings)
+      : 1;
+
+  // 4. 재료 목록: 줄바꿈으로 연결
+  const ingredients = (jsonLdRecipe.ingredients || [])
+    .map((i) => i.trim())
+    .filter(Boolean)
+    .join('\n');
+
+  // 5. 조리 순서: "1. ...\n2. ..." 형태의 method 문자열
+  const method = (jsonLdRecipe.instructions || [])
+    .map((step, idx) => {
+      const cleanStep = step.replace(/^\d+[\.\)]\s*/, '').trim();
+      return `${idx + 1}. ${cleanStep}`;
+    })
+    .filter(Boolean)
+    .join('\n');
+
+  // 6. 조리 시간: 명시된 cookingTimeMinutes (1~360 사이) 또는 15
+  const cookingTimeMinutes =
+    typeof jsonLdRecipe.cookingTimeMinutes === 'number' && jsonLdRecipe.cookingTimeMinutes > 0
+      ? jsonLdRecipe.cookingTimeMinutes
+      : 15;
+
+  // 7. 난이도: AI 없이 안전한 '보통' 기본값
+  const difficulty: '쉬움' | '보통' | '어려움' = '보통';
+
+  // 8. 팁: description이 있으면 활용, 없으면 빈 문자열
+  const tips = (jsonLdRecipe.description && jsonLdRecipe.description.trim()) || '';
+
+  // 9. 이미지 URL
+  const imageUrl = jsonLdRecipe.imageUrl?.trim() || undefined;
+
+  return {
+    name,
+    category,
+    icon,
+    baseServings,
+    ingredients: ingredients || '재료 정보 없음',
+    method: method || '1. 조리 순서 정보 없음',
+    cookingTimeMinutes,
+    difficulty,
+    tips,
+    imageUrl,
+  };
+}
+
+/**
+ * convertJsonLdToImportedRecipe 별칭 함수 (normalizeJsonLdToRecipe와 동일)
+ */
+export const convertJsonLdToImportedRecipe = normalizeJsonLdToRecipe;
 
 /**
  * SSRF(Server-Side Request Forgery) 방어를 위한 URL 유효성 검증
@@ -401,6 +596,46 @@ export function formatJsonLdPromptText(recipe: ParsedJsonLdRecipe, sourceUrl: st
 }
 
 /**
+ * 부분적으로만 존재하는 JSON-LD 정보와 HTML 본문을 조합하여
+ * Gemini가 이미 확정된 정보를 왜곡하지 않고 누락된 부분만 보완할 수 있도록 프롬프트 텍스트를 구성합니다.
+ * @param recipe 부분 추출된 JSON-LD 레시피
+ * @param htmlText 정제된 HTML 본문 텍스트
+ * @param sourceUrl 출처 URL
+ * @returns 조합된 프롬프트 텍스트
+ */
+export function formatPartialJsonLdPromptText(
+  recipe: ParsedJsonLdRecipe,
+  htmlText: string,
+  sourceUrl: string
+): string {
+  const parts: string[] = [];
+
+  parts.push(`[웹페이지 출처]: ${sourceUrl}`);
+  parts.push(`\n[확정된 웹페이지 구조화 정보 (수정/왜곡 금지 - 그대로 유지할 것)]:`);
+  if (recipe.name) parts.push(`- 요리명: ${recipe.name}`);
+  if (recipe.servings) parts.push(`- 기준 인분: ${recipe.servings}인분 (원문: ${recipe.rawYield || `${recipe.servings}인분`})`);
+  if (recipe.cookingTimeMinutes) parts.push(`- 조리시간: ${recipe.cookingTimeMinutes}분`);
+  if (recipe.category) parts.push(`- 카테고리: ${recipe.category}`);
+  if (recipe.description) parts.push(`- 요리 소개: ${recipe.description}`);
+
+  if (recipe.ingredients && recipe.ingredients.length > 0) {
+    parts.push(`- 확정 재료 목록:\n` + recipe.ingredients.map((i) => `  * ${i}`).join('\n'));
+  }
+
+  if (recipe.instructions && recipe.instructions.length > 0) {
+    parts.push(
+      `- 확정 조리 순서:\n` +
+        recipe.instructions.map((s, idx) => `  ${idx + 1}. ${s.replace(/^\d+[\.\)]\s*/, '')}`).join('\n')
+    );
+  }
+
+  parts.push(`\n[웹페이지 HTML 본문 내용 (누락된 조리법/재료 보완용)]:`);
+  parts.push(htmlText);
+
+  return parts.join('\n');
+}
+
+/**
  * HTML 문서에서 레시피와 무관한 잡음(헤더, 푸터, 네비게이션, 광고, 댓글, 스크립트 등)을 제거하고
  * 레시피 핵심 본문을 우선 추출하는 고속 경량 파서.
  * 토큰 소비를 대폭 줄이고 Gemini 응답 속도를 2~3배 끌어올리기 위해 최대 3,500자 이내로 엄선 정제합니다.
@@ -484,8 +719,9 @@ export async function fetchAndParseRecipePage(
 ): Promise<RecipePageParseResult> {
   const startedAt = Date.now();
 
-  // 0. URL 전처리 (모바일 최적화 등)
-  const normalizedUrl = normalizeRecipeRequestUrl(targetUrl);
+  // 0. URL 전처리 (추적 쿼리 파라미터 srsltid 제거 -> 모바일 친화적 주소 정규화)
+  const strippedUrl = stripTrackingParams(targetUrl);
+  const normalizedUrl = normalizeRecipeRequestUrl(strippedUrl);
 
   // 1. SSRF 방어 검증
   const validation = validateAndSanitizeUrl(normalizedUrl);
@@ -581,21 +817,39 @@ export async function fetchAndParseRecipePage(
 
   // 3-1. JSON-LD Recipe 탐색 (최우선)
   const jsonLdRecipe = extractJsonLdRecipe(html);
-  if (jsonLdRecipe && (jsonLdRecipe.name || (jsonLdRecipe.ingredients && jsonLdRecipe.ingredients.length > 0))) {
-    const formattedPrompt = formatJsonLdPromptText(jsonLdRecipe, sanitizedUrl);
+  if (jsonLdRecipe) {
+    const isSufficient = isSufficientJsonLdRecipe(jsonLdRecipe);
     const parseDurationMs = Date.now() - parseStart;
 
-    return {
-      success: true,
-      sourceType: 'jsonld',
-      url: sanitizedUrl,
-      title: jsonLdRecipe.name,
-      extractedText: formattedPrompt,
-      jsonLdRecipe,
-      fetchDurationMs,
-      parseDurationMs,
-      fetchStatus: status,
-    };
+    if (isSufficient) {
+      // 완전한 JSON-LD: Gemini 호출 없이 Direct Mode 지원
+      return {
+        success: true,
+        sourceType: 'jsonld',
+        url: sanitizedUrl,
+        title: jsonLdRecipe.name,
+        extractedText: formatJsonLdPromptText(jsonLdRecipe, sanitizedUrl),
+        jsonLdRecipe,
+        fetchDurationMs,
+        parseDurationMs,
+        fetchStatus: status,
+      };
+    } else if (jsonLdRecipe.name || (jsonLdRecipe.ingredients && jsonLdRecipe.ingredients.length > 0)) {
+      // 부분적 JSON-LD: HTML 본문과 결합하여 Gemini AI 보완 지원
+      const cleanedHtml = cleanHtmlFallback(html);
+      const combinedText = formatPartialJsonLdPromptText(jsonLdRecipe, cleanedHtml, sanitizedUrl);
+      return {
+        success: true,
+        sourceType: 'html',
+        url: sanitizedUrl,
+        title: jsonLdRecipe.name,
+        extractedText: combinedText,
+        jsonLdRecipe,
+        fetchDurationMs,
+        parseDurationMs,
+        fetchStatus: status,
+      };
+    }
   }
 
   // 3-2. HTML Fallback 정제

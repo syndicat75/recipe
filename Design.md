@@ -13,8 +13,15 @@
 7. 🔥 **1인분 기준 예상 영양정보 분석 & 필터링 시스템 (Gemini 3.7 Flash AI 1인분 영양 분석, 열량·단백질·탄수화물·지방·나트륨·식이섬유, 채소 비중, 맞춤 영양 필터 및 다차원 정렬)**
 8. ✨ **AI 자동 주간 식단표 만들기 (Gemini 3.7 Flash 기반 맞춤 일주일 식단 구성, 중복·최근 식단 배제, 칼로리·시간 제약, 미리보기 및 개별 교체, 오프라인 Fallback 지원)**
 9. 🎤 **핸즈프리 조리 음성비서 (주방 완전 무터치 제어, 로컬 자연어 파서, TTS/STT 음향 루프 차단, 멀티타이머 음성 동기화, 인분 맞춤 재료 질의응답, 2단계 완료 안전 확인)**
+10. ⚡ **JSON-LD Direct Mode & 고신뢰 웹페이지 레시피 파이프라인 (불필요한 Gemini AI 호출 0회 생략, 쿼터 소모 0, 폐기 모델 제거 및 정밀 오류 분류)**
 
 ### 아키텍처 안정성 및 엔지니어링 개선 (Stability & Robustness)
+- ⚡ **JSON-LD Direct Mode & 웹페이지 파서 (`lib/recipePageParser.ts`, `lib/ai/modelConfig.ts`, `lib/geminiService.ts`)**:
+  - **JSON-LD 성공 시 Gemini 호출 전면 생략 (Direct Mode)**: 만개의레시피, 블로그 등 웹페이지에서 `schema.org/Recipe` 유효 데이터(제목, 재료, 조리순서) 추출 시 Gemini AI를 호출하지 않고 로컬에서 즉시 `Recipe` 형태로 변환하여 0ms AI 지연시간과 쿼터 소모 0을 달성.
+  - **Gemini Quota 소모 대폭 절감**: 구조화 데이터가 충분한 대부분의 레시피 URL에서 AI 호출을 우회하여 429 RESOURCE_EXHAUSTED를 원천 차단.
+  - **폐기된 Fallback 모델 제거 & 최신 모델 체인화**: 404를 유발하던 `gemini-2.5-flash-lite`를 제거하고, `gemini-3.7-flash` (Primary) ➔ `gemini-2.5-flash` (Fallback 1) ➔ `gemini-3.5-flash-lite` (Fallback 2)로 체계화.
+  - **Quota / Model Error 정밀 분류 및 즉각 전환**: 429 Quota 에러 발생 시 무의미한 동일 모델 재시도를 생략하고 다음 모델로 즉시 Fallback 전환하며, 모든 모델 실패 시 상세 진단 및 대체 방안을 안내.
+  - **추적 파라미터 자동 정제 & SSRF 방어**: `stripTrackingParams`를 통해 불필요한 UTM/마케팅 파라미터를 제거하고 사설망 IP 접근을 차단.
 - 🎙️ **핸즈프리 조리 음성비서 (`src/hooks/useCookingVoiceAssistant.ts`, `src/utils/cookingVoiceCommands.ts`)**:
   - **100% 클라이언트 로컬 명령 파서**: 외부 AI API(Gemini) 호출 없이 브라우저 내에서 0ms 지연으로 실시간 처리하여 네트워크 장애/비용/Quota 제약 없는 주방 최적화.
   - **TTS ➔ STT 자기 음성 오인식 방지 메커니즘**: 음성 합성(TTS) 재생 시 STT 마이크를 선제적으로 일시 차단(abort)하고, 발화 완료 후 잔향 대기(250ms) 후 안전하게 청취를 재개하는 `isSpeakingRef` / `shouldListenRef` 구조.

@@ -276,6 +276,7 @@ export const ImportRecipeModal: React.FC<ImportRecipeModalProps> = ({
         difficulty?: '쉬움' | '보통' | '어려움';
         tip?: string;
         tips?: string;
+        imageUrl?: string;
         lowConfidenceFields?: string[];
       }
 
@@ -287,7 +288,8 @@ export const ImportRecipeModal: React.FC<ImportRecipeModalProps> = ({
         throw new Error('레시피 데이터를 추출하지 못했습니다.');
       }
 
-      logger.info('ImportRecipeModal.handleAnalyze', `AI 분석 성공: ${resData.name}`);
+      const isDirectJsonLd = data.meta?.aiUsed === false || data.meta?.sourceType === 'jsonld';
+      logger.info('ImportRecipeModal.handleAnalyze', `레시피 분석/가져오기 성공: ${resData.name} (Direct: ${isDirectJsonLd})`);
 
       // 유효 카테고리 매핑 (활성화된 카테고리 우선, 전체 카테고리 보조, 실패 시 '기타')
       let cat: string = FALLBACK_CATEGORY;
@@ -312,11 +314,18 @@ export const ImportRecipeModal: React.FC<ImportRecipeModalProps> = ({
         cookingTimeMinutes: Number(resData.cookingTimeMinutes) || 15,
         difficulty: resData.difficulty || '쉬움',
         tips: resData.tip || resData.tips || '',
-        sourceImageUrl: activeTab === 'image' && imagePreview ? imagePreview : undefined,
+        sourceImageUrl:
+          activeTab === 'image' && imagePreview
+            ? imagePreview
+            : resData.imageUrl || undefined,
         lowConfidenceFields: Array.isArray(resData.lowConfidenceFields) ? resData.lowConfidenceFields : [],
       });
 
-      showToast('✨ AI가 레시피를 성공적으로 분석했습니다! 내용을 검토 후 저장해주세요.', 'success');
+      if (isDirectJsonLd) {
+        showToast('⚡ 구조화 데이터(JSON-LD)로 즉시 가져왔습니다! 내용을 검토 후 저장해주세요.', 'success');
+      } else {
+        showToast('✨ AI가 레시피를 성공적으로 분석했습니다! 내용을 검토 후 저장해주세요.', 'success');
+      }
     } catch (err) {
       logger.error('ImportRecipeModal.handleAnalyze', '분석 실패', err);
       setErrorMsg(

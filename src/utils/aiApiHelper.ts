@@ -21,6 +21,7 @@ export interface AiApiResponse<T = unknown> {
   reason?: string;
   meta?: {
     sourceType?: 'jsonld' | 'html' | 'text' | 'image';
+    aiUsed?: boolean;
     fetchDurationMs?: number;
     parseDurationMs?: number;
     aiDurationMs?: number;

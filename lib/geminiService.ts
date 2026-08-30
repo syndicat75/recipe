@@ -1,13 +1,26 @@
 /**
  * @file lib/geminiService.ts
  * @description Gemini 모델을 활용한 레시피 AI 서비스 핵심 비즈니스 로직.
- * gemini-3.7-flash를 기본 모델로 사용하며, 모델 과부하(503/UNAVAILABLE) 발생 시
- * Exponential Backoff + Jitter 재시도 및 gemini-3.6-flash 자동 Fallback을 지원합니다.
+ * gemini-3.7-flash를 기본 모델로 사용하며, 모델 과부하(503/UNAVAILABLE) 및 쿼터 소진(429/RESOURCE_EXHAUSTED) 발생 시
+ * 중앙 설정된 다단계 Fallback 체인(gemini-2.5-flash, gemini-3.5-flash-lite)으로 자동 전환합니다.
+ * JSON-LD 구조화 데이터가 충분할 때는 Gemini 호출을 전면 생략(Direct Mode)하여 쿼터 소모를 0으로 만듭니다.
  * Vercel Serverless Functions(api/ai/*) 및 로컬 Express 서버(server.ts)에서 공통으로 사용됩니다.
  */
 
 import { GoogleGenAI, Type } from '@google/genai';
-import { fetchAndParseRecipePage } from './recipePageParser.js';
+import {
+  fetchAndParseRecipePage,
+  normalizeJsonLdToRecipe,
+  isSufficientJsonLdRecipe,
+} from './recipePageParser.js';
+import {
+  AI_MODELS,
+  ModelFailureRecord,
+  isQuotaError,
+  isModelNotFoundError,
+  parseRetryDelay,
+  formatModelChainError,
+} from './ai/modelConfig.js';
 
 type GenerateContentParameters = Parameters<GoogleGenAI['models']['generateContent']>[0];
 type GenerateContentResult = Awaited<ReturnType<GoogleGenAI['models']['generateContent']>>;
@@ -44,17 +57,18 @@ export function getGeminiClient(): GoogleGenAI {
 
 /**
  * Gemini 모델 과부하(503/UNAVAILABLE) 및 쿼터 소진(RESOURCE_EXHAUSTED/429)에 대응하는
- * 고속 다단계 Fallback 체인 (Primary: gemini-3.7-flash -> Fallback 1: gemini-flash-latest -> Fallback 2: gemini-3.1-flash-lite)
+ * 고속 다단계 Fallback 체인 (Primary: gemini-3.7-flash -> Fallback 1: gemini-2.5-flash -> Fallback 2: gemini-3.5-flash-lite)
  * - 쿼터 초과나 429 감지 시 동일 모델에 대한 무의미한 지연 대기를 즉시 중단하고 다음 모델로 전환합니다.
- * - retryMode가 'fast'인 경우 전체 10초 예산 내에서 신속하게 결과를 확보하여 클라이언트 타임아웃을 원천 차단합니다.
+ * - 404 미지원 모델 감지 시 즉시 다음 모델로 건너뜁니다.
+ * - retryMode가 'fast'인 경우 1회 시도 후 신속하게 Fallback으로 전환하여 클라이언트 타임아웃을 방지합니다.
  */
 async function generateWithFallback(
   ai: GoogleGenAI,
   request: Omit<GenerateContentParameters, 'model'> & { model?: string },
   options: GenerateFallbackOptions = {}
 ): Promise<GenerateContentResult & { executionMeta?: ModelExecutionMeta }> {
-  const primaryModel = 'gemini-3.7-flash';
-  const fallbackModels = ['gemini-2.5-flash', 'gemini-2.5-flash-lite'];
+  const primaryModel = AI_MODELS.primary;
+  const fallbackModels = AI_MODELS.fallback;
   const retryMode = options.retryMode || 'standard';
   const startedAt = options.startedAt || Date.now();
   const callStart = Date.now();
@@ -66,7 +80,7 @@ async function generateWithFallback(
   const delays = [600];
 
   let retryCount = 0;
-  let lastError: unknown = null;
+  const failures: ModelFailureRecord[] = [];
 
   // 1. Primary 모델 시도 (gemini-3.7-flash)
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
@@ -85,41 +99,53 @@ async function generateWithFallback(
         },
       });
     } catch (error) {
-      lastError = error;
       retryCount = attempt + 1;
       const message = error instanceof Error ? error.message : String(error);
+      const isQuota = isQuotaError(error);
+      const isNotFound = isModelNotFoundError(error);
+      const retryDelay = parseRetryDelay(error);
 
-      // 400, 401, 403, 404 등 클라이언트/인증 오류는 즉시 throw
-      const isClientOrAuthError =
-        message.includes('400') ||
+      failures.push({
+        model: primaryModel,
+        message,
+        isQuota,
+        isNotFound,
+        retryDelay,
+        timestamp: Date.now(),
+      });
+
+      // 401, 403 등 인증 오류는 즉시 throw (인증키 문제는 fallback으로 해결 불가)
+      const isAuthError =
         message.includes('401') ||
         message.includes('403') ||
-        message.includes('404') ||
         message.includes('API_KEY_INVALID');
-      if (isClientOrAuthError) {
+      if (isAuthError) {
         throw error;
       }
 
+      // 404 모델 미지원인 경우 즉시 다음 fallback으로 진행
+      if (isNotFound) {
+        console.warn(`${reqTag}[MODEL_NOT_AVAILABLE] Primary ${primaryModel} 사용 불가 - 즉시 Fallback 전환: ${message}`);
+        break;
+      }
+
       // 할당량 초과(RESOURCE_EXHAUSTED / 429)는 동일 모델 재시도 없이 즉시 Fallback으로 스위칭
-      const isQuotaOrRateLimit =
-        message.includes('RESOURCE_EXHAUSTED') ||
-        message.includes('429') ||
-        message.includes('quota') ||
-        message.includes('Quota exceeded');
-      if (isQuotaOrRateLimit) {
-        console.warn(`${reqTag}Gemini 3.7 Flash 할당량 초과 감지 - 동일 모델 재시도 생략 후 즉시 Fallback 체인 가동`);
+      if (isQuota) {
+        console.warn(
+          `${reqTag}Primary ${primaryModel} 할당량 초과 감지 (${retryDelay || '대기시간 미지정'}) - 동일 모델 재시도 생략 후 즉시 Fallback 체인 가동`
+        );
         break;
       }
 
       const elapsed = Date.now() - startedAt;
       if (isFast && elapsed > 8000) {
-        console.warn(`${reqTag}Gemini 3.7 Fast Mode - 경과 시간(${elapsed}ms) 초과로 즉시 Fallback 전환`);
+        console.warn(`${reqTag}Primary ${primaryModel} Fast Mode - 경과 시간(${elapsed}ms) 초과로 즉시 Fallback 전환`);
         break;
       }
 
       if (attempt < maxAttempts - 1) {
         const delay = (delays[attempt] || 600) + Math.floor(Math.random() * 200);
-        console.warn(`${reqTag}Gemini 3.7 Flash 일시 과부하 - ${delay}ms 후 재시도 (${attempt + 1}/${maxAttempts - 1})`);
+        console.warn(`${reqTag}Primary ${primaryModel} 일시 과부하 - ${delay}ms 후 재시도 (${attempt + 1}/${maxAttempts - 1})`);
         await new Promise((resolve) => setTimeout(resolve, delay));
       }
     }
@@ -143,13 +169,37 @@ async function generateWithFallback(
         },
       });
     } catch (fallbackError) {
-      lastError = fallbackError;
-      console.warn(`${reqTag}Fallback to ${fallbackModel} failed:`, fallbackError);
+      const message = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
+      const isQuota = isQuotaError(fallbackError);
+      const isNotFound = isModelNotFoundError(fallbackError);
+      const retryDelay = parseRetryDelay(fallbackError);
+
+      failures.push({
+        model: fallbackModel,
+        message,
+        isQuota,
+        isNotFound,
+        retryDelay,
+        timestamp: Date.now(),
+      });
+
+      if (isNotFound) {
+        console.warn(`${reqTag}[MODEL_NOT_AVAILABLE] Fallback ${fallbackModel} 사용 불가: ${message}`);
+      } else if (isQuota) {
+        console.warn(`${reqTag}Fallback ${fallbackModel} 쿼터 초과 (${retryDelay || '대기시간 미지정'})`);
+      } else {
+        console.warn(`${reqTag}Fallback to ${fallbackModel} failed:`, fallbackError);
+      }
       // 다음 fallback 모델로 계속 진행
     }
   }
 
-  throw lastError || new Error('모든 AI 모델 호출에 실패했습니다.');
+  // 모든 모델 호출 실패 시, 쿼터 에러 등이 누락되지 않도록 formatModelChainError 적용
+  const formattedErr = formatModelChainError(failures, '모든 AI 모델 호출에 실패했습니다.');
+  const finalError = new Error(formattedErr.error);
+  (finalError as unknown as Record<string, unknown>).details = formattedErr.details;
+  (finalError as unknown as Record<string, unknown>).errorCode = formattedErr.errorCode;
+  throw finalError;
 }
 
 /**
@@ -192,27 +242,39 @@ function safeParseGeminiJson<T>(rawText: string | undefined): T {
 function formatAiServiceError(
   error: unknown,
   defaultMessage: string
-): { error: string; details?: string } {
+): { error: string; details?: string; errorCode?: string } {
   if (error instanceof Error && error.message === 'GEMINI_API_KEY_NOT_CONFIGURED') {
     return {
       error: 'AI 서버 설정이 완료되지 않았습니다. GEMINI_API_KEY를 확인해주세요.',
+      errorCode: 'AI_AUTH_ERROR',
+    };
+  }
+
+  // 이미 구조화된 에러인 경우
+  if (
+    error &&
+    typeof error === 'object' &&
+    'errorCode' in error &&
+    typeof (error as Record<string, unknown>).errorCode === 'string'
+  ) {
+    const customErr = error as { message?: string; details?: string; errorCode?: string };
+    return {
+      error: customErr.message || defaultMessage,
+      details: customErr.details,
+      errorCode: customErr.errorCode,
     };
   }
 
   const errString = error instanceof Error ? error.message : String(error);
 
   // 할당량(Quota) 초과 시 명확하고 친절한 안내
-  const isQuotaExceeded =
-    errString.includes('RESOURCE_EXHAUSTED') ||
-    errString.includes('quota') ||
-    errString.includes('Quota exceeded') ||
-    errString.includes('rate-limits');
-
-  if (isQuotaExceeded) {
+  if (isQuotaError(error)) {
+    const delay = parseRetryDelay(error);
+    const delayInfo = delay ? `${delay} 후 다시 시도하시거나, ` : '잠시 후 다시 시도하시거나, ';
     return {
-      error:
-        'AI 서비스 일일 이용량(할당량)이 일시적으로 초과되었습니다. 잠시 후 다시 시도하시거나, 레시피 텍스트를 복사하여 "텍스트 가져오기" 또는 직접 등록을 이용해주세요.',
+      error: `AI 서비스 일일 이용량(할당량)이 일시적으로 초과되었습니다. ${delayInfo}레시피 텍스트를 복사하여 "텍스트 가져오기" 또는 직접 등록을 이용해주세요.`,
       details: errString,
+      errorCode: 'AI_QUOTA_EXHAUSTED',
     };
   }
 
@@ -220,27 +282,28 @@ function formatAiServiceError(
     errString.includes('503') ||
     errString.includes('UNAVAILABLE') ||
     errString.includes('high demand') ||
-    errString.includes('overloaded') ||
-    errString.includes('429');
+    errString.includes('overloaded');
 
   if (isOverloadedOrRateLimited) {
     return {
       error: '현재 AI 서버 이용량이 많아 일시적으로 지연되었습니다. 잠시 후 다시 시도해주세요.',
       details: errString,
+      errorCode: 'AI_SERVER_OVERLOAD',
     };
   }
 
   return {
     error: defaultMessage,
     details: errString,
+    errorCode: 'AI_UNKNOWN_ERROR',
   };
 }
 
 /**
  * 1. URL 또는 텍스트 기반 레시피 구조화 추출
- * schema.org/Recipe JSON-LD를 최우선 탐색하여 광고/댓글/메뉴를 배제한 최소 데이터만 Gemini에 전달합니다.
- * JSON-LD 부재 시에만 정제된 HTML 본문을 전달합니다.
- * @param params url, text, requestId
+ * schema.org/Recipe JSON-LD를 최우선 탐색하여 충분한 정보가 있으면 Gemini AI 호출을 생략(Direct Mode)합니다.
+ * JSON-LD 부재 또는 불완전 시에만 정제된 텍스트를 Gemini에 전달합니다.
+ * @param params url, text, requestId, availableCategories
  * @returns 정제된 레시피 데이터 및 성능 진단 메타
  */
 export async function importRecipeFromTextOrUrl(params: {
@@ -253,8 +316,10 @@ export async function importRecipeFromTextOrUrl(params: {
   data?: Record<string, unknown>;
   error?: string;
   details?: string;
+  errorCode?: string;
   meta?: {
     sourceType: 'jsonld' | 'html' | 'text';
+    aiUsed: boolean;
     fetchDurationMs: number;
     parseDurationMs: number;
     aiDurationMs: number;
@@ -285,7 +350,6 @@ export async function importRecipeFromTextOrUrl(params: {
         : ['반찬', '소스·양념', '국·찌개', '중식·양식', '밥·한그릇', '계란요리', '기타'];
     const categoryOptionsText = validCategoryList.map((c) => `'${c}'`).join(', ');
 
-    const ai = getGeminiClient();
     let sourceType: 'jsonld' | 'html' | 'text' = 'text';
     let fetchDurationMs = 0;
     let parseDurationMs = 0;
@@ -300,12 +364,44 @@ export async function importRecipeFromTextOrUrl(params: {
 
       if (parseResult.success) {
         sourceType = parseResult.sourceType as 'jsonld' | 'html';
+
+        // 🔥 JSON-LD Direct Mode: 유효한 구조화 데이터가 있으면 Gemini AI 호출 전면 생략 (0ms AI / 0 쿼터)
+        if (
+          parseResult.sourceType === 'jsonld' &&
+          parseResult.jsonLdRecipe &&
+          isSufficientJsonLdRecipe(parseResult.jsonLdRecipe)
+        ) {
+          const directRecipe = normalizeJsonLdToRecipe(parseResult.jsonLdRecipe, availableCategories);
+          const totalDurationMs = Date.now() - startedAt;
+          console.info(
+            `[recipe-import][${reqId}] DIRECT JSON-LD (AI 미사용): fetch ${fetchDurationMs}ms, parse ${parseDurationMs}ms, total ${totalDurationMs}ms, recipe: "${directRecipe.name}"`
+          );
+
+          return {
+            success: true,
+            data: directRecipe as unknown as Record<string, unknown>,
+            meta: {
+              sourceType: 'jsonld',
+              aiUsed: false,
+              fetchDurationMs,
+              parseDurationMs,
+              aiDurationMs: 0,
+              totalDurationMs,
+              modelUsed: 'none (direct json-ld)',
+              retryCount: 0,
+              fallbackUsed: false,
+              requestId: reqId,
+            },
+          };
+        }
+
+        // 불완전 JSON-LD 또는 일반 HTML인 경우에만 AI 분석 텍스트로 사용
         sourceContent = parseResult.extractedText;
         if (parseResult.jsonLdRecipe?.servings) {
           hintServings = parseResult.jsonLdRecipe.servings;
         }
         console.info(
-          `[recipe-import][${reqId}] URL fetch: ${fetchDurationMs}ms (${sourceType}), parse: ${parseDurationMs}ms`
+          `[recipe-import][${reqId}] URL fetch: ${fetchDurationMs}ms (${sourceType}), parse: ${parseDurationMs}ms, AI 분석 준비`
         );
       } else {
         console.warn(
@@ -336,6 +432,8 @@ export async function importRecipeFromTextOrUrl(params: {
       sourceContent = `[사용자 입력 텍스트]:\n${text.trim()}`;
     }
 
+    const ai = getGeminiClient();
+
     // 3. Gemini 구조화 추출 프롬프트 (군더더기 없는 JSON 전용)
     const prompt = `당신은 대한민국 최고의 요리 연구가이자 레시피 정리 전문가입니다.
 제공된 요리 레시피 원본 내용 또는 구조화 데이터를 분석하여 사용자가 바로 요리할 수 있도록 군더더기 없는 JSON 형식으로 정제해주세요.
@@ -359,7 +457,8 @@ ${sourceContent}
       {
         contents: prompt,
         config: {
-          systemInstruction: 'You are an expert Korean chef and culinary data parser. Output pure JSON without markdown explanation.',
+          systemInstruction:
+            'You are an expert Korean chef and culinary data parser. Output pure JSON without markdown explanation.',
           responseMimeType: 'application/json',
           responseSchema: {
             type: Type.OBJECT,
@@ -408,7 +507,7 @@ ${sourceContent}
 
     const aiDurationMs = response.executionMeta?.aiDurationMs || 0;
     const totalDurationMs = Date.now() - startedAt;
-    const modelUsed = response.executionMeta?.modelUsed || 'gemini-3.7-flash';
+    const modelUsed = response.executionMeta?.modelUsed || AI_MODELS.primary;
     const retryCount = response.executionMeta?.retryCount || 0;
     const fallbackUsed = response.executionMeta?.fallbackUsed || false;
 
@@ -425,6 +524,7 @@ ${sourceContent}
       },
       meta: {
         sourceType,
+        aiUsed: true,
         fetchDurationMs,
         parseDurationMs,
         aiDurationMs,
