@@ -357,6 +357,28 @@ export const MobileNavMenu: React.FC<MobileNavMenuProps> = ({
             </button>
           )}
 
+          {/* 📊 Excel 데이터 백업 및 복원 */}
+          {onOpenBackupRestore && (
+            <button
+              type="button"
+              id="mobile-btn-backup-restore"
+              onClick={() => {
+                logger.info('MobileNavMenu', '백업/복원 클릭');
+                onOpenBackupRestore();
+                onClose();
+              }}
+              className="w-full flex items-center justify-between rounded-xl p-2.5 text-xs font-bold text-stone-700 bg-stone-50 hover:bg-emerald-50 hover:text-emerald-900 transition"
+            >
+              <div className="flex items-center gap-2">
+                <Database className="h-4 w-4 text-emerald-600" />
+                <span>데이터 백업 및 복원</span>
+              </div>
+              <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-1.5 py-0.5 rounded">
+                .xlsx
+              </span>
+            </button>
+          )}
+
           {/* 📲 PWA App Install Item (Mobile) */}
           {!isStandalone && onInstallPwa && (
             <div>
@@ -470,19 +492,6 @@ export const MobileNavMenu: React.FC<MobileNavMenuProps> = ({
               </span>
             </button>
           )}
-
-          <button
-            type="button"
-            onClick={() => {
-              logger.info('MobileNavMenu', '백업/복원 클릭');
-              onOpenBackupRestore();
-              onClose();
-            }}
-            className="w-full flex items-center gap-2 rounded-xl p-2.5 text-xs font-bold text-stone-700 bg-stone-50 hover:bg-stone-100 transition"
-          >
-            <Database className="h-4 w-4 text-stone-500" />
-            <span>데이터 백업 및 복원</span>
-          </button>
 
           {onRestoreDefaultRecipes && (
             <button

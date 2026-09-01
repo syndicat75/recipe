@@ -158,8 +158,30 @@ export const ToolsMenu: React.FC<ToolsMenuProps> = ({
               </span>
             </button>
 
+            {/* 📊 Excel 데이터 백업 / 복원 */}
+            {onOpenBackupRestore && (
+              <button
+                type="button"
+                id="menu-btn-backup-restore"
+                onClick={() => {
+                  logger.info('ToolsMenu', '백업/복원 항목 클릭');
+                  setIsOpen(false);
+                  onOpenBackupRestore();
+                }}
+                className="w-full flex items-center justify-between rounded-xl px-2.5 py-2 text-xs font-semibold text-stone-700 hover:bg-emerald-50 hover:text-emerald-900 transition text-left"
+              >
+                <div className="flex items-center gap-2">
+                  <Database className="h-4 w-4 text-emerald-600" />
+                  <span>데이터 백업 / 복원</span>
+                </div>
+                <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded-md">
+                  .xlsx
+                </span>
+              </button>
+            )}
+
             {/* 관리자 전용 기능 구분선 */}
-            {isAdmin && (onOpenCategoryManager || onOpenBackupRestore || onRestoreDefaultRecipes || onOpenAdminCalories) && (
+            {isAdmin && (onOpenCategoryManager || onRestoreDefaultRecipes || onOpenAdminCalories) && (
               <div className="my-1 border-t border-stone-100 pt-1" />
             )}
 
@@ -202,22 +224,6 @@ export const ToolsMenu: React.FC<ToolsMenuProps> = ({
                 <span className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded-md">
                   AI
                 </span>
-              </button>
-            )}
-
-            {/* 💾 백업 / 복원 (관리자 전용) */}
-            {isAdmin && onOpenBackupRestore && (
-              <button
-                type="button"
-                onClick={() => {
-                  logger.info('ToolsMenu', '백업/복원 항목 클릭');
-                  setIsOpen(false);
-                  onOpenBackupRestore();
-                }}
-                className="w-full flex items-center gap-2 rounded-xl px-2.5 py-2 text-xs font-semibold text-stone-700 hover:bg-orange-50 hover:text-orange-900 transition text-left"
-              >
-                <Database className="h-4 w-4 text-amber-600" />
-                <span>데이터 백업 / 복원</span>
               </button>
             )}
 
